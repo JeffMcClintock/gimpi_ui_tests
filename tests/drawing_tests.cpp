@@ -51,17 +51,56 @@ using namespace gmpi::drawing::Colors;
 // locked pixels are 32bpp (PBGRA on Windows, RGBA on macOS).
 
 #ifdef _WIN32
-// Linear-to-sRGB conversion for a single channel (0–255).
-static uint8_t linearToSRGB(uint8_t v)
+// Linear float [0,1] → sRGB uint8_t [0,255].
+static uint8_t linearToSRGB_f(float c)
 {
-    float c = v / 255.0f;
+    c = std::clamp(c, 0.0f, 1.0f);
     float s = (c <= 0.0031308f)
         ? c * 12.92f
         : 1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f;
     return static_cast<uint8_t>(std::clamp(s * 255.0f + 0.5f, 0.0f, 255.0f));
 }
 
-// Windows implementation using WIC
+// Linear uint8_t [0,255] → sRGB uint8_t [0,255].
+static uint8_t linearToSRGB(uint8_t v)
+{
+    return linearToSRGB_f(v / 255.0f);
+}
+
+// IEEE 754 half-precision float → float.
+static float halfToFloat(uint16_t h)
+{
+    const uint32_t sign = (h >> 15) & 0x1u;
+    const uint32_t exp  = (h >> 10) & 0x1fu;
+    const uint32_t mant = h & 0x3ffu;
+    uint32_t bits;
+    if (exp == 0)
+    {
+        if (mant == 0) { bits = sign << 31; }
+        else
+        {
+            // Subnormal: normalise
+            uint32_t e = 0, m = mant;
+            while (!(m & 0x400u)) { m <<= 1; ++e; }
+            bits = (sign << 31) | ((127 - 15 - e + 1) << 23) | ((m & 0x3ffu) << 13);
+        }
+    }
+    else if (exp == 31)
+    {
+        bits = (sign << 31) | 0x7f800000u | (mant << 13); // Inf / NaN
+    }
+    else
+    {
+        bits = (sign << 31) | ((exp + (127 - 15)) << 23) | (mant << 13);
+    }
+    float f; std::memcpy(&f, &bits, 4); return f;
+}
+
+// Windows implementation using WIC.
+// Handles both render-target pixel formats:
+//   64bppPRGBAHalf (8 bytes/pixel) — float-precision linear premultiplied RGBA
+//   32bppPBGRA     (4 bytes/pixel) — 8-bit linear premultiplied BGRA
+// Output is always a 32bpp sRGB BGRA PNG.
 static bool savePng(const std::filesystem::path& path, gmpi::drawing::Bitmap& bitmap)
 {
     std::filesystem::create_directories(path.parent_path());
@@ -70,51 +109,81 @@ static bool savePng(const std::filesystem::path& path, gmpi::drawing::Bitmap& bi
     if (!pixels)
         return false;
 
-    uint8_t* data    = pixels.getAddress();
-    int32_t  bpr     = pixels.getBytesPerRow();
-    SizeU    size    = bitmap.getSize();
+    const uint8_t* srcData = pixels.getAddress();
+    const int32_t  srcBpr  = pixels.getBytesPerRow();
+    const SizeU    size    = bitmap.getSize();
+    const int32_t  srcBpp  = srcBpr / static_cast<int32_t>(size.width); // 4 or 8
 
-    // Direct2D renders in linear premultiplied alpha.  Convert to sRGB
-    // (un-premultiply, apply sRGB gamma, re-premultiply) so the PNG
-    // contains correct sRGB pixel values.
-    std::vector<uint8_t> srgbData(bpr * size.height);
+    // Output is always 32bpp BGRA sRGB.
+    const int32_t outBpr = static_cast<int32_t>(size.width) * 4;
+    std::vector<uint8_t> srgbData(static_cast<size_t>(outBpr) * size.height);
+
     for (uint32_t y = 0; y < size.height; ++y)
     {
-        const uint8_t* src = data + y * bpr;
-        uint8_t*       dst = srgbData.data() + y * bpr;
+        const uint8_t* src = srcData + y * srcBpr;
+        uint8_t*       dst = srgbData.data() + y * outBpr;
+
         for (uint32_t x = 0; x < size.width; ++x)
         {
-            // PBGRA layout
-            uint8_t pb = src[0], pg = src[1], pr = src[2], a = src[3];
-            if (a == 0)
+            uint8_t r, g, b, a;
+
+            if (srcBpp == 8)
             {
-                dst[0] = dst[1] = dst[2] = dst[3] = 0;
+                // 64bppPRGBAHalf: linear premultiplied RGBA half-float.
+                const uint16_t* h = reinterpret_cast<const uint16_t*>(src);
+                float fr = halfToFloat(h[0]);
+                float fg = halfToFloat(h[1]);
+                float fb = halfToFloat(h[2]);
+                float fa = halfToFloat(h[3]);
+
+                a = static_cast<uint8_t>(std::clamp(fa * 255.0f + 0.5f, 0.0f, 255.0f));
+                if (fa > 0.0f)
+                {
+                    fr = std::clamp(fr / fa, 0.0f, 1.0f);
+                    fg = std::clamp(fg / fa, 0.0f, 1.0f);
+                    fb = std::clamp(fb / fa, 0.0f, 1.0f);
+                }
+                else { fr = fg = fb = 0.0f; }
+
+                r = linearToSRGB_f(fr);
+                g = linearToSRGB_f(fg);
+                b = linearToSRGB_f(fb);
             }
             else
             {
-                // Un-premultiply, apply sRGB gamma, re-premultiply.
+                // 32bppPBGRA: linear premultiplied BGRA 8-bit.
+                a = src[3];
+                if (a == 0)
+                {
+                    dst[0] = dst[1] = dst[2] = dst[3] = 0;
+                    src += 4; dst += 4;
+                    continue;
+                }
                 float fa = a / 255.0f;
-                uint8_t r = linearToSRGB(static_cast<uint8_t>(std::clamp(pr / fa + 0.5f, 0.0f, 255.0f)));
-                uint8_t g = linearToSRGB(static_cast<uint8_t>(std::clamp(pg / fa + 0.5f, 0.0f, 255.0f)));
-                uint8_t b = linearToSRGB(static_cast<uint8_t>(std::clamp(pb / fa + 0.5f, 0.0f, 255.0f)));
-                if (a == 255)
-                {
-                    dst[0] = b; dst[1] = g; dst[2] = r; dst[3] = 255;
-                }
-                else
-                {
-                    dst[0] = static_cast<uint8_t>(b * fa + 0.5f);
-                    dst[1] = static_cast<uint8_t>(g * fa + 0.5f);
-                    dst[2] = static_cast<uint8_t>(r * fa + 0.5f);
-                    dst[3] = a;
-                }
+                b = linearToSRGB(static_cast<uint8_t>(std::clamp(src[0] / fa + 0.5f, 0.0f, 255.0f)));
+                g = linearToSRGB(static_cast<uint8_t>(std::clamp(src[1] / fa + 0.5f, 0.0f, 255.0f)));
+                r = linearToSRGB(static_cast<uint8_t>(std::clamp(src[2] / fa + 0.5f, 0.0f, 255.0f)));
             }
-            src += 4;
+
+            // Store sRGB BGRA, re-premultiplied.
+            if (a == 255)
+            {
+                dst[0] = b; dst[1] = g; dst[2] = r; dst[3] = 255;
+            }
+            else
+            {
+                float fa = a / 255.0f;
+                dst[0] = static_cast<uint8_t>(b * fa + 0.5f);
+                dst[1] = static_cast<uint8_t>(g * fa + 0.5f);
+                dst[2] = static_cast<uint8_t>(r * fa + 0.5f);
+                dst[3] = a;
+            }
+            src += srcBpp;
             dst += 4;
         }
     }
 
-    // Create a short-lived WIC factory for encoding only.
+    // Encode to PNG via WIC.
     IWICImagingFactory* rawWic{};
     CoCreateInstance(
         CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
@@ -145,7 +214,66 @@ static bool savePng(const std::filesystem::path& path, gmpi::drawing::Bitmap& bi
     frame->SetSize(size.width, size.height);
     WICPixelFormatGUID fmt = GUID_WICPixelFormat32bppPBGRA;
     frame->SetPixelFormat(&fmt);
-    frame->WritePixels(size.height, bpr, bpr * size.height, srgbData.data());
+    frame->WritePixels(size.height, outBpr, static_cast<UINT>(srgbData.size()), srgbData.data());
+    frame->Commit();
+    encoder->Commit();
+
+    return true;
+}
+
+// Creates a 128x20 sRGB gradient PNG where column x has grey value x (0..127).
+// Only writes the file if it does not already exist.
+static bool createSRGBGradientPng(const std::filesystem::path& path)
+{
+    if (std::filesystem::exists(path))
+        return true;
+
+    std::filesystem::create_directories(path.parent_path());
+
+    constexpr uint32_t W = 128, H = 20;
+    // Raw BGRA pixels — fully opaque grey, sRGB value = column index.
+    std::vector<uint8_t> pixels(W * H * 4);
+    for (uint32_t y = 0; y < H; ++y)
+        for (uint32_t x = 0; x < W; ++x)
+        {
+            uint8_t v = static_cast<uint8_t>(x); // sRGB grey 0..127
+            uint8_t* p = pixels.data() + (y * W + x) * 4;
+            p[0] = v;   // B
+            p[1] = v;   // G
+            p[2] = v;   // R
+            p[3] = 255; // A
+        }
+
+    IWICImagingFactory* rawWic{};
+    CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+        __uuidof(IWICImagingFactory), reinterpret_cast<void**>(&rawWic));
+    gmpi::directx::ComPtr<IWICImagingFactory> wic(rawWic);
+    if (!wic) return false;
+
+    IWICStream* rawStream{};
+    wic->CreateStream(&rawStream);
+    gmpi::directx::ComPtr<IWICStream> stream(rawStream);
+    if (!stream) return false;
+    stream->InitializeFromFilename(path.wstring().c_str(), GENERIC_WRITE);
+
+    IWICBitmapEncoder* rawEncoder{};
+    wic->CreateEncoder(GUID_ContainerFormatPng, nullptr, &rawEncoder);
+    gmpi::directx::ComPtr<IWICBitmapEncoder> encoder(rawEncoder);
+    if (!encoder) return false;
+    encoder->Initialize(stream, WICBitmapEncoderNoCache);
+
+    IWICBitmapFrameEncode* rawFrame{};
+    IPropertyBag2* props{};
+    encoder->CreateNewFrame(&rawFrame, &props);
+    gmpi::directx::ComPtr<IWICBitmapFrameEncode> frame(rawFrame);
+    if (props) props->Release();
+    if (!frame) return false;
+
+    frame->Initialize(nullptr);
+    frame->SetSize(W, H);
+    WICPixelFormatGUID fmt = GUID_WICPixelFormat32bppBGRA;
+    frame->SetPixelFormat(&fmt);
+    frame->WritePixels(H, W * 4, static_cast<UINT>(pixels.size()), pixels.data());
     frame->Commit();
     encoder->Commit();
 
@@ -204,10 +332,10 @@ protected:
     static constexpr uint32_t kWidth  = 64;
     static constexpr uint32_t kHeight = 64;
 
-    // Use EightBitPixels so the WIC bitmap backing the render target is
-    // 32bpp PBGRA – the format that lockPixels / getPixel understand.
-    static constexpr int32_t kRenderFlags =
-        static_cast<int32_t>(BitmapRenderTargetFlags::EightBitPixels);
+    // No EightBitPixels flag → WIC bitmap is 64bppPRGBAHalf (8 bytes/pixel).
+    // This matches the float-precision swapchain used by gmpi_ui on screen,
+    // giving accurate colour round-trips with no 8-bit linear quantisation.
+    static constexpr int32_t kRenderFlags = 0;
 
 #ifdef _WIN32
     std::unique_ptr<gmpi::directx::Factory> dxFactory;
@@ -332,8 +460,18 @@ protected:
         }
 
         // Compare pixels.
+        // Rendered bitmap may be 64bppPRGBAHalf (8 bytes/pixel, float linear) or
+        // 32bppPBGRA (4 bytes/pixel, 8-bit linear).  Reference bitmap is always
+        // 32bppPBGRA sRGB (as loaded from PNG).  We convert the rendered pixel to
+        // sRGB BGRA uint8_t before comparing so both sides are in the same space.
         auto ourPixels = bitmap.lockPixels(BitmapLockFlags::Read);
         auto refPixels = refBitmap.lockPixels(BitmapLockFlags::Read);
+
+        const uint8_t* ourAddr = ourPixels.getAddress();
+        const int32_t  ourBpr  = ourPixels.getBytesPerRow();
+        const int32_t  ourBpp  = ourBpr / static_cast<int32_t>(ourSize.width);
+        const uint8_t* refAddr = refPixels.getAddress();
+        const int32_t  refBpr  = refPixels.getBytesPerRow();
 
         int     diffCount   = 0;
         int     maxChanDiff = 0;
@@ -343,46 +481,73 @@ protected:
         {
             for (uint32_t x = 0; x < ourSize.width; ++x)
             {
-                uint32_t a = ourPixels.getPixel(x, y);
-                const uint32_t b = refPixels.getPixel(x, y);
+                // Convert rendered pixel → sRGB BGRA uint8_t[4].
+                uint8_t rendered[4];
 #ifdef _WIN32
-                // Direct2D lockPixels returns linear premultiplied BGRA.
-                // Reference PNGs are sRGB.  Convert rendered pixel to sRGB
-                // so the comparison is in the same colour space.
+                if (ourBpp == 8)
                 {
-                    uint8_t* p = reinterpret_cast<uint8_t*>(&a);
-                    uint8_t alpha = p[3];
-                    if (alpha > 0)
+                    // 64bppPRGBAHalf: linear premultiplied RGBA half-float.
+                    const uint16_t* h = reinterpret_cast<const uint16_t*>(
+                        ourAddr + y * ourBpr + x * 8);
+                    float fr = halfToFloat(h[0]);
+                    float fg = halfToFloat(h[1]);
+                    float fb = halfToFloat(h[2]);
+                    float fa = halfToFloat(h[3]);
+
+                    uint8_t a = static_cast<uint8_t>(std::clamp(fa * 255.0f + 0.5f, 0.0f, 255.0f));
+                    if (fa > 0.0f)
                     {
-                        float fa = alpha / 255.0f;
-                        for (int ch = 0; ch < 3; ++ch)
-                        {
-                            // Un-premultiply, apply sRGB gamma, re-premultiply.
-                            uint8_t linear = static_cast<uint8_t>(std::clamp(p[ch] / fa + 0.5f, 0.0f, 255.0f));
-                            uint8_t srgb   = linearToSRGB(linear);
-                            p[ch] = (alpha == 255) ? srgb : static_cast<uint8_t>(srgb * fa + 0.5f);
-                        }
+                        fr = std::clamp(fr / fa, 0.0f, 1.0f);
+                        fg = std::clamp(fg / fa, 0.0f, 1.0f);
+                        fb = std::clamp(fb / fa, 0.0f, 1.0f);
+                    }
+                    else { fr = fg = fb = 0.0f; }
+
+                    rendered[0] = linearToSRGB_f(fb); // B
+                    rendered[1] = linearToSRGB_f(fg); // G
+                    rendered[2] = linearToSRGB_f(fr); // R
+                    rendered[3] = a;
+                }
+                else
+                {
+                    // 32bppPBGRA: linear premultiplied BGRA 8-bit.
+                    const uint8_t* p = ourAddr + y * ourBpr + x * 4;
+                    uint8_t a = p[3];
+                    if (a == 0)
+                    {
+                        rendered[0] = rendered[1] = rendered[2] = rendered[3] = 0;
+                    }
+                    else
+                    {
+                        float fa = a / 255.0f;
+                        rendered[2] = linearToSRGB(static_cast<uint8_t>(std::clamp(p[2] / fa + 0.5f, 0.0f, 255.0f)));
+                        rendered[1] = linearToSRGB(static_cast<uint8_t>(std::clamp(p[1] / fa + 0.5f, 0.0f, 255.0f)));
+                        rendered[0] = linearToSRGB(static_cast<uint8_t>(std::clamp(p[0] / fa + 0.5f, 0.0f, 255.0f)));
+                        rendered[3] = a;
                     }
                 }
+#else
+                // macOS: lockPixels returns sRGB RGBA directly.
+                const uint8_t* p = ourAddr + y * ourBpr + x * 4;
+                rendered[0] = p[0]; rendered[1] = p[1];
+                rendered[2] = p[2]; rendered[3] = p[3];
 #endif
-                if (a != b)
+                // Reference: sRGB BGRA from loaded PNG (always 32bppPBGRA).
+                const uint8_t* ref = refAddr + y * refBpr + x * 4;
+
+                int pixelMaxDiff = 0;
+                int pixelDiff    = 0;
+                for (int c = 0; c < 4; ++c)
                 {
-                    int pixelMaxDiff = 0;
-                    int pixelDiff    = 0;
-                    for (int c = 0; c < 4; ++c)
-                    {
-                        int d = std::abs(
-                            static_cast<int>((a >> (c * 8)) & 0xFF) -
-                            static_cast<int>((b >> (c * 8)) & 0xFF));
-                        pixelMaxDiff = std::max(pixelMaxDiff, d);
-                        pixelDiff   += d;
-                    }
-                    if (pixelMaxDiff > tolerance)
-                    {
-                        ++diffCount;
-                        maxChanDiff = std::max(maxChanDiff, pixelMaxDiff);
-                        totalDiff  += pixelDiff;
-                    }
+                    int d = std::abs(static_cast<int>(rendered[c]) - static_cast<int>(ref[c]));
+                    pixelMaxDiff = std::max(pixelMaxDiff, d);
+                    pixelDiff   += d;
+                }
+                if (pixelMaxDiff > tolerance)
+                {
+                    ++diffCount;
+                    maxChanDiff = std::max(maxChanDiff, pixelMaxDiff);
+                    totalDiff  += pixelDiff;
                 }
             }
         }
@@ -1405,4 +1570,39 @@ TEST_F(DrawingTest, FontMetricsVisual)
 
     bigRT.endDraw();
     EXPECT_TRUE(checkBitmap("fontMetricsVisual", bigRT, 12));
+}
+
+// ============================================================
+// Colour round-trip test
+// ============================================================
+
+// Load a PNG with known sRGB grey values, draw it 1:1, save, and compare.
+// The source gradient (128x20, column x = sRGB grey value x for x=0..127)
+// is also used as the reference image.  A perfect round-trip should
+// reproduce every sRGB value exactly; any gamma or precision error will
+// appear as differing pixels.
+TEST_F(DrawingTest, ColourRoundTrip)
+{
+    const auto gradPath = referenceDir() / "colourRoundTrip.png";
+
+#ifdef _WIN32
+    ASSERT_TRUE(createSRGBGradientPng(gradPath))
+        << "Failed to create sRGB gradient PNG at: " << gradPath.string();
+#endif
+
+    // Load the gradient PNG as a bitmap.
+    gmpi::drawing::Bitmap srcBmp;
+    dxFactory->loadImageU(gradPath.string().c_str(), AccessPtr::put(srcBmp));
+    ASSERT_TRUE(srcBmp) << "Failed to load gradient PNG: " << gradPath.string();
+
+    // Render into a dedicated 128x20 render target, drawing the bitmap 1:1.
+    gmpi::drawing::BitmapRenderTarget rt;
+    dxFactory->createCpuRenderTarget({128, 20}, kRenderFlags, AccessPtr::put(rt));
+    rt.beginDraw();
+    rt.drawBitmap(srcBmp, {0.f, 0.f, 128.f, 20.f}, {0.f, 0.f, 128.f, 20.f},
+                  1.0f, BitmapInterpolationMode::NearestNeighbor);
+    rt.endDraw();
+
+    // The gradient PNG is the reference — the round-trip output must match it.
+    EXPECT_TRUE(checkBitmap("colourRoundTrip", rt));
 }
