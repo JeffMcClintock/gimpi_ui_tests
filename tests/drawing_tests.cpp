@@ -51,6 +51,16 @@ using namespace gmpi::drawing::Colors;
 // locked pixels are 32bpp (PBGRA on Windows, RGBA on macOS).
 
 #ifdef _WIN32
+// Linear-to-sRGB conversion for a single channel (0–255).
+static uint8_t linearToSRGB(uint8_t v)
+{
+    float c = v / 255.0f;
+    float s = (c <= 0.0031308f)
+        ? c * 12.92f
+        : 1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f;
+    return static_cast<uint8_t>(std::clamp(s * 255.0f + 0.5f, 0.0f, 255.0f));
+}
+
 // Windows implementation using WIC
 static bool savePng(const std::filesystem::path& path, gmpi::drawing::Bitmap& bitmap)
 {
@@ -63,6 +73,46 @@ static bool savePng(const std::filesystem::path& path, gmpi::drawing::Bitmap& bi
     uint8_t* data    = pixels.getAddress();
     int32_t  bpr     = pixels.getBytesPerRow();
     SizeU    size    = bitmap.getSize();
+
+    // Direct2D renders in linear premultiplied alpha.  Convert to sRGB
+    // (un-premultiply, apply sRGB gamma, re-premultiply) so the PNG
+    // contains correct sRGB pixel values.
+    std::vector<uint8_t> srgbData(bpr * size.height);
+    for (uint32_t y = 0; y < size.height; ++y)
+    {
+        const uint8_t* src = data + y * bpr;
+        uint8_t*       dst = srgbData.data() + y * bpr;
+        for (uint32_t x = 0; x < size.width; ++x)
+        {
+            // PBGRA layout
+            uint8_t pb = src[0], pg = src[1], pr = src[2], a = src[3];
+            if (a == 0)
+            {
+                dst[0] = dst[1] = dst[2] = dst[3] = 0;
+            }
+            else
+            {
+                // Un-premultiply, apply sRGB gamma, re-premultiply.
+                float fa = a / 255.0f;
+                uint8_t r = linearToSRGB(static_cast<uint8_t>(std::clamp(pr / fa + 0.5f, 0.0f, 255.0f)));
+                uint8_t g = linearToSRGB(static_cast<uint8_t>(std::clamp(pg / fa + 0.5f, 0.0f, 255.0f)));
+                uint8_t b = linearToSRGB(static_cast<uint8_t>(std::clamp(pb / fa + 0.5f, 0.0f, 255.0f)));
+                if (a == 255)
+                {
+                    dst[0] = b; dst[1] = g; dst[2] = r; dst[3] = 255;
+                }
+                else
+                {
+                    dst[0] = static_cast<uint8_t>(b * fa + 0.5f);
+                    dst[1] = static_cast<uint8_t>(g * fa + 0.5f);
+                    dst[2] = static_cast<uint8_t>(r * fa + 0.5f);
+                    dst[3] = a;
+                }
+            }
+            src += 4;
+            dst += 4;
+        }
+    }
 
     // Create a short-lived WIC factory for encoding only.
     IWICImagingFactory* rawWic{};
@@ -95,7 +145,7 @@ static bool savePng(const std::filesystem::path& path, gmpi::drawing::Bitmap& bi
     frame->SetSize(size.width, size.height);
     WICPixelFormatGUID fmt = GUID_WICPixelFormat32bppPBGRA;
     frame->SetPixelFormat(&fmt);
-    frame->WritePixels(size.height, bpr, bpr * size.height, data);
+    frame->WritePixels(size.height, bpr, bpr * size.height, srgbData.data());
     frame->Commit();
     encoder->Commit();
 
@@ -293,8 +343,28 @@ protected:
         {
             for (uint32_t x = 0; x < ourSize.width; ++x)
             {
-                const uint32_t a = ourPixels.getPixel(x, y);
+                uint32_t a = ourPixels.getPixel(x, y);
                 const uint32_t b = refPixels.getPixel(x, y);
+#ifdef _WIN32
+                // Direct2D lockPixels returns linear premultiplied BGRA.
+                // Reference PNGs are sRGB.  Convert rendered pixel to sRGB
+                // so the comparison is in the same colour space.
+                {
+                    uint8_t* p = reinterpret_cast<uint8_t*>(&a);
+                    uint8_t alpha = p[3];
+                    if (alpha > 0)
+                    {
+                        float fa = alpha / 255.0f;
+                        for (int ch = 0; ch < 3; ++ch)
+                        {
+                            // Un-premultiply, apply sRGB gamma, re-premultiply.
+                            uint8_t linear = static_cast<uint8_t>(std::clamp(p[ch] / fa + 0.5f, 0.0f, 255.0f));
+                            uint8_t srgb   = linearToSRGB(linear);
+                            p[ch] = (alpha == 255) ? srgb : static_cast<uint8_t>(srgb * fa + 0.5f);
+                        }
+                    }
+                }
+#endif
                 if (a != b)
                 {
                     int pixelMaxDiff = 0;
