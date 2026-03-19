@@ -44,10 +44,18 @@ FetchContent_MakeAvailable(googletest)
 # ---------------------------------------------------------------------------
 # Test executable
 # ---------------------------------------------------------------------------
-add_executable(gmpi_ui_tests
-    tests/drawing_tests.cpp
-    ${GMPI_UI_SDK}/backends/DirectXGfx.cpp
-)
+if(APPLE)
+    # Use the .mm wrapper so drawing_tests.cpp is compiled as Objective-C++.
+    add_executable(gmpi_ui_tests
+        tests/drawing_tests_mac.mm
+        ${GMPI_UI_SDK}/backends/DirectXGfx.cpp
+    )
+else()
+    add_executable(gmpi_ui_tests
+        tests/drawing_tests.cpp
+        ${GMPI_UI_SDK}/backends/DirectXGfx.cpp
+    )
+endif()
 
 target_include_directories(gmpi_ui_tests PRIVATE
     ${GMPI_UI_SDK}
@@ -68,14 +76,27 @@ if(MSVC)
     target_compile_options(gmpi_ui_tests PRIVATE /W3 /WX-)
 endif()
 
-target_link_libraries(gmpi_ui_tests PRIVATE
-    gtest_main
-    d2d1
-    dwrite
-    WindowsCodecs
-    d3d11
-    dxgi
-)
+# ---------------------------------------------------------------------------
+# Platform-specific configuration
+# ---------------------------------------------------------------------------
+if(APPLE)
+    target_link_libraries(gmpi_ui_tests PRIVATE
+        gtest_main
+        "-framework Cocoa"
+        "-framework CoreGraphics"
+        "-framework ImageIO"
+        "-framework CoreText"
+    )
+else()
+    target_link_libraries(gmpi_ui_tests PRIVATE
+        gtest_main
+        d2d1
+        dwrite
+        WindowsCodecs
+        d3d11
+        dxgi
+    )
+endif()
 
 enable_testing()
 include(GoogleTest)

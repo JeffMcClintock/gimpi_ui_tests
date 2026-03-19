@@ -11,10 +11,17 @@
 //  4. On future regression: the test FAILs and writes
 //     reference_images/<testName>_actual.png alongside a diff log.
 
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <Windows.h>
 #include <wincodec.h>
+#endif
+
+#ifdef __APPLE__
+#import <Cocoa/Cocoa.h>
+#import <ImageIO/ImageIO.h>
+#endif
 
 #include <gtest/gtest.h>
 
@@ -26,17 +33,25 @@
 #include <sstream>
 #include <string>
 
+#ifdef _WIN32
 #include "backends/DirectXGfx.h"
+#endif
+#ifdef __APPLE__
+#include "backends/CocoaGfx.h"
+#endif
 #include "Drawing.h"
 
 using namespace gmpi::drawing;
 using namespace gmpi::drawing::Colors;
 
 // ============================================================
-// savePng  –  save a GMPI Bitmap to a PNG file using WIC
+// savePng  –  save a GMPI Bitmap to a PNG file
 // ============================================================
 // The bitmap must have been created with the EightBitPixels flag so its
-// locked pixels are 32bpp PBGRA, which WIC's PNG encoder accepts directly.
+// locked pixels are 32bpp (PBGRA on Windows, RGBA on macOS).
+
+#ifdef _WIN32
+// Windows implementation using WIC
 static bool savePng(const std::filesystem::path& path, gmpi::drawing::Bitmap& bitmap)
 {
     std::filesystem::create_directories(path.parent_path());
@@ -86,6 +101,49 @@ static bool savePng(const std::filesystem::path& path, gmpi::drawing::Bitmap& bi
 
     return true;
 }
+#endif // _WIN32
+
+#ifdef __APPLE__
+// macOS implementation using CoreGraphics / ImageIO
+static bool savePng(const std::filesystem::path& path, gmpi::drawing::Bitmap& bitmap)
+{
+    std::filesystem::create_directories(path.parent_path());
+
+    auto pixels = bitmap.lockPixels(BitmapLockFlags::Read);
+    if (!pixels)
+        return false;
+
+    uint8_t* data    = pixels.getAddress();
+    int32_t  bpr     = pixels.getBytesPerRow();
+    SizeU    size    = bitmap.getSize();
+
+    CGColorSpaceRef colorSpace = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    CGContextRef ctx = CGBitmapContextCreate(
+        data, size.width, size.height, 8, bpr,
+        colorSpace,
+        kCGImageAlphaPremultipliedLast); // RGBA premultiplied
+    CGColorSpaceRelease(colorSpace);
+    if (!ctx) return false;
+
+    CGImageRef image = CGBitmapContextCreateImage(ctx);
+    CGContextRelease(ctx);
+    if (!image) return false;
+
+    CFStringRef cfPath = CFStringCreateWithCString(kCFAllocatorDefault, path.c_str(), kCFStringEncodingUTF8);
+    CFURLRef url = CFURLCreateWithFileSystemPath(kCFAllocatorDefault, cfPath, kCFURLPOSIXPathStyle, false);
+    CFRelease(cfPath);
+    CGImageDestinationRef dest = CGImageDestinationCreateWithURL(url, CFSTR("public.png"), 1, nullptr);
+    CFRelease(url);
+    if (!dest) { CGImageRelease(image); return false; }
+
+    CGImageDestinationAddImage(dest, image, nullptr);
+    bool ok = CGImageDestinationFinalize(dest);
+    CFRelease(dest);
+    CGImageRelease(image);
+
+    return ok;
+}
+#endif // __APPLE__
 
 // ============================================================
 // DrawingTest fixture
@@ -101,7 +159,12 @@ protected:
     static constexpr int32_t kRenderFlags =
         static_cast<int32_t>(BitmapRenderTargetFlags::EightBitPixels);
 
+#ifdef _WIN32
     std::unique_ptr<gmpi::directx::Factory> dxFactory;
+#endif
+#ifdef __APPLE__
+    std::unique_ptr<gmpi::cocoa::Factory> dxFactory;
+#endif
     gmpi::drawing::BitmapRenderTarget rt;
     bool drawingActive = false;
 
@@ -112,8 +175,13 @@ protected:
 
     void SetUp() override
     {
+#ifdef _WIN32
         CoInitialize(nullptr);
         dxFactory = std::make_unique<gmpi::directx::Factory>();
+#endif
+#ifdef __APPLE__
+        dxFactory = std::make_unique<gmpi::cocoa::Factory>();
+#endif
         dxFactory->createCpuRenderTarget({kWidth, kHeight}, kRenderFlags, AccessPtr::put(rt));
         rt.beginDraw();
         drawingActive = true;
@@ -170,7 +238,9 @@ protected:
         // Release rt before factory to avoid dangling pointer.
         rt = gmpi::drawing::BitmapRenderTarget{};
         dxFactory.reset();
+#ifdef _WIN32
         CoUninitialize();
+#endif
     }
 
     // Core comparison helper — works with any already-ended BitmapRenderTarget.
@@ -1020,7 +1090,7 @@ PathGeometry makePentagram(gmpi::drawing::BitmapRenderTarget& rt, FillMode fm)
 {
     constexpr float cx = 32.f, cy = 32.f, r = 28.f;
     constexpr float kPi = 3.14159265f;
-    auto pt = [&](float deg) -> Point {
+    auto pt = [&](float deg) -> gmpi::drawing::Point {
         const float rad = deg * kPi / 180.f;
         return {cx + r * std::cos(rad), cy + r * std::sin(rad)};
     };
@@ -1042,7 +1112,7 @@ PathGeometry makePentagram(gmpi::drawing::BitmapRenderTarget& rt, FillMode fm)
 // Square contour helper.
 // clockwise=true  → TL→TR→BR→BL  (positive winding in screen/Y-down space)
 // clockwise=false → TL→BL→BR→TR  (negative winding)
-void addSquareFigure(GeometrySink& sink, Rect r, bool clockwise)
+void addSquareFigure(GeometrySink& sink, gmpi::drawing::Rect r, bool clockwise)
 {
     if (clockwise)
     {
@@ -1216,7 +1286,7 @@ TEST_F(DrawingTest, FontMetricsVisual)
     // ---- glyphs: black text drawn on top of the lines ----
     auto textBrush = bigRT.createSolidColorBrush(Colors::Black);
     // Position layout rect so text baseline lands exactly at kBaselineY.
-    const Rect layoutRect{4.f, ascenderY, W, descenderY};
+    const gmpi::drawing::Rect layoutRect{4.f, ascenderY, W, descenderY};
     bigRT.drawTextU("Hfgx", tf, layoutRect, textBrush);
 
     // ---- labels (small Arial, right-aligned, matching line colour) ----
