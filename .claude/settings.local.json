@@ -3,7 +3,11 @@
     "allow": [
       "Bash(git ls-tree:*)",
       "Bash(grep -r macro.*gmpi_plugin /c/SE/GMPI-plugins)",
-      "Bash(find C:/SE/gmpi_ui -name *test* -o -name CMakeLists.txt)"
+      "Bash(find C:/SE/gmpi_ui -name *test* -o -name CMakeLists.txt)",
+      "Bash(cmake --build build --config Debug)",
+      "Bash(buildDebuggmpi_ui_tests.exe)",
+      "Read(//mnt/c/SE/**)",
+      "Bash(build/Debug/gmpi_ui_tests.exe)"
     ]
   }
 }
