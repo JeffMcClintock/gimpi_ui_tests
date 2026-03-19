@@ -1199,6 +1199,48 @@ TEST_F(DrawingTest, StrokeStyleRoundJoin)
     EXPECT_TRUE(checkResult("strokeStyleRoundJoin"));
 }
 
+// All four line-join styles on an acute V-shape drawn side by side.
+// Columns (left to right): default (Miter), Bevel, Round, MiterOrBevel.
+TEST_F(DrawingTest, StrokeStyleLineJoins)
+{
+    g.clear(Colors::White);
+
+    // Each V is drawn in a 16-wide column.  The apex points downward so the
+    // acute angle makes the miter spike clearly visible.
+    struct JoinCase { LineJoin join; Color color; };
+    const JoinCase cases[] = {
+        { LineJoin::Miter,        Colors::Crimson      },
+        { LineJoin::Bevel,        Colors::DarkGreen    },
+        { LineJoin::Round,        Colors::DarkBlue     },
+        { LineJoin::MiterOrBevel, Colors::DarkOrange   },
+    };
+
+    for (int i = 0; i < 4; ++i)
+    {
+        const float cx = 8.f + i * 16.f;   // column centre x
+        const float top = 8.f;
+        const float apexY = 56.f;
+        const float halfW = 6.f;            // half-width of the V arms at top
+
+        StrokeStyleProperties props;
+        props.lineJoin = cases[i].join;
+        auto ss    = makeStrokeStyle(props);
+        auto brush = g.createSolidColorBrush(cases[i].color);
+
+        auto geom = g.getFactory().createPathGeometry();
+        auto sink = geom.open();
+        sink.beginFigure({cx - halfW, top}, FigureBegin::Hollow);
+        sink.addLine({cx,            apexY});
+        sink.addLine({cx + halfW,    top});
+        sink.endFigure(FigureEnd::Open);
+        sink.close();
+
+        g.drawGeometry(geom, brush, 4.f, ss);
+    }
+
+    EXPECT_TRUE(checkResult("strokeStyleLineJoins"));
+}
+
 // ============================================================
 // Degenerate / boundary cases
 // ============================================================
