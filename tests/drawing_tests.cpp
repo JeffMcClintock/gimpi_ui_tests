@@ -215,7 +215,7 @@ protected:
 #ifdef __APPLE__
     std::unique_ptr<gmpi::cocoa::Factory> dxFactory;
 #endif
-    gmpi::drawing::BitmapRenderTarget rt;
+    gmpi::drawing::BitmapRenderTarget g;
     bool drawingActive = false;
 
     static std::filesystem::path referenceDir()
@@ -232,17 +232,17 @@ protected:
 #ifdef __APPLE__
         dxFactory = std::make_unique<gmpi::cocoa::Factory>();
 #endif
-        dxFactory->createCpuRenderTarget({kWidth, kHeight}, kRenderFlags, AccessPtr::put(rt));
-        rt.beginDraw();
+        dxFactory->createCpuRenderTarget({kWidth, kHeight}, kRenderFlags, AccessPtr::put(g));
+        g.beginDraw();
         drawingActive = true;
-        rt.clear(Colors::White);
+        g.clear(Colors::White);
     }
 
     // Create a StrokeStyle via the render target's factory wrapper.
     StrokeStyle makeStrokeStyle(StrokeStyleProperties props,
                                 std::span<const float> dashes = {})
     {
-        return rt.getFactory().createStrokeStyle(props, dashes);
+        return g.getFactory().createStrokeStyle(props, dashes);
     }
 
     // Create a TextFormat via the low-level factory.
@@ -278,15 +278,15 @@ protected:
                 patRT.fillRectangle({float(x), float(y), float(x+1), float(y+1)}, b2);
         patRT.endDraw();
         auto patternBitmap = patRT.getBitmap();
-        return rt.createBitmapBrush(patternBitmap);
+        return g.createBitmapBrush(patternBitmap);
     }
 
     void TearDown() override
     {
         if (drawingActive)
-            rt.endDraw();
+            g.endDraw();
         // Release rt before factory to avoid dangling pointer.
-        rt = gmpi::drawing::BitmapRenderTarget{};
+        g = gmpi::drawing::BitmapRenderTarget{};
         dxFactory.reset();
 #ifdef _WIN32
         CoUninitialize();
@@ -428,10 +428,10 @@ protected:
     {
         if (drawingActive)
         {
-            rt.endDraw();
+            g.endDraw();
             drawingActive = false;
         }
-        return checkBitmap(testName, rt, tolerance);
+        return checkBitmap(testName, g, tolerance);
     }
 };
 
@@ -442,63 +442,63 @@ protected:
 // Clear the entire render target with a flat colour.
 TEST_F(DrawingTest, Clear)
 {
-    rt.clear(Colors::CornflowerBlue);
+    g.clear(Colors::CornflowerBlue);
     EXPECT_TRUE(checkResult("clear"));
 }
 
 // Fill a rectangle leaving an 8-pixel border.
 TEST_F(DrawingTest, FillRectangle)
 {
-    auto brush = rt.createSolidColorBrush(Colors::SteelBlue);
-    rt.fillRectangle({8.f, 8.f, 56.f, 56.f}, brush);
+    auto brush = g.createSolidColorBrush(Colors::SteelBlue);
+    g.fillRectangle({8.f, 8.f, 56.f, 56.f}, brush);
     EXPECT_TRUE(checkResult("fillRectangle"));
 }
 
 // Stroke a rectangle (no fill) with a 2-pixel line.
 TEST_F(DrawingTest, DrawRectangle)
 {
-    auto brush = rt.createSolidColorBrush(Colors::DarkRed);
-    rt.drawRectangle({8.f, 8.f, 56.f, 56.f}, brush, 2.0f);
+    auto brush = g.createSolidColorBrush(Colors::DarkRed);
+    g.drawRectangle({8.f, 8.f, 56.f, 56.f}, brush, 2.0f);
     EXPECT_TRUE(checkResult("drawRectangle"));
 }
 
 // Draw a diagonal line across the bitmap.
 TEST_F(DrawingTest, DrawLine)
 {
-    auto brush = rt.createSolidColorBrush(Colors::DarkGreen);
-    rt.drawLine({8.f, 8.f}, {56.f, 56.f}, brush, 2.0f);
+    auto brush = g.createSolidColorBrush(Colors::DarkGreen);
+    g.drawLine({8.f, 8.f}, {56.f, 56.f}, brush, 2.0f);
     EXPECT_TRUE(checkResult("drawLine"));
 }
 
 // Fill a circle centred in the bitmap.
 TEST_F(DrawingTest, FillEllipse)
 {
-    auto brush = rt.createSolidColorBrush(Colors::Orchid);
-    rt.fillEllipse(gmpi::drawing::Ellipse{{32.f, 32.f}, 24.f, 24.f}, brush);
+    auto brush = g.createSolidColorBrush(Colors::Orchid);
+    g.fillEllipse(gmpi::drawing::Ellipse{{32.f, 32.f}, 24.f, 24.f}, brush);
     EXPECT_TRUE(checkResult("fillEllipse"));
 }
 
 // Stroke a circle (no fill) with a 2-pixel line.
 TEST_F(DrawingTest, DrawEllipse)
 {
-    auto brush = rt.createSolidColorBrush(Colors::DarkSlateGray);
-    rt.drawEllipse(gmpi::drawing::Ellipse{{32.f, 32.f}, 24.f, 24.f}, brush, 2.0f);
+    auto brush = g.createSolidColorBrush(Colors::DarkSlateGray);
+    g.drawEllipse(gmpi::drawing::Ellipse{{32.f, 32.f}, 24.f, 24.f}, brush, 2.0f);
     EXPECT_TRUE(checkResult("drawEllipse"));
 }
 
 // Fill a rounded rectangle.
 TEST_F(DrawingTest, FillRoundedRectangle)
 {
-    auto brush = rt.createSolidColorBrush(Colors::Tomato);
-    rt.fillRoundedRectangle(RoundedRect{{8.f, 8.f, 56.f, 56.f}, 8.f, 8.f}, brush);
+    auto brush = g.createSolidColorBrush(Colors::Tomato);
+    g.fillRoundedRectangle(RoundedRect{{8.f, 8.f, 56.f, 56.f}, 8.f, 8.f}, brush);
     EXPECT_TRUE(checkResult("fillRoundedRectangle"));
 }
 
 // Stroke a rounded rectangle with a 2-pixel line.
 TEST_F(DrawingTest, DrawRoundedRectangle)
 {
-    auto brush = rt.createSolidColorBrush(Colors::MidnightBlue);
-    rt.drawRoundedRectangle(RoundedRect{{8.f, 8.f, 56.f, 56.f}, 8.f, 8.f}, brush, 2.0f);
+    auto brush = g.createSolidColorBrush(Colors::MidnightBlue);
+    g.drawRoundedRectangle(RoundedRect{{8.f, 8.f, 56.f, 56.f}, 8.f, 8.f}, brush, 2.0f);
     EXPECT_TRUE(checkResult("drawRoundedRectangle"));
 }
 
@@ -509,17 +509,17 @@ TEST_F(DrawingTest, LinearGradientFill)
         {0.0f, Colors::Red},
         {1.0f, Colors::Blue},
     };
-    auto brush = rt.createLinearGradientBrush(stops, {0.f, 0.f}, {64.f, 0.f});
-    rt.fillRectangle({0.f, 0.f, 64.f, 64.f}, brush);
+    auto brush = g.createLinearGradientBrush(stops, {0.f, 0.f}, {64.f, 0.f});
+    g.fillRectangle({0.f, 0.f, 64.f, 64.f}, brush);
     EXPECT_TRUE(checkResult("linearGradientFill"));
 }
 
 // Fill a rectangle with a radial gradient (yellow centre → dark edge).
 TEST_F(DrawingTest, RadialGradientFill)
 {
-    auto brush = rt.createRadialGradientBrush(
+    auto brush = g.createRadialGradientBrush(
         {32.f, 32.f}, 28.f, Colors::Yellow, Colors::DarkBlue);
-    rt.fillRectangle({0.f, 0.f, 64.f, 64.f}, brush);
+    g.fillRectangle({0.f, 0.f, 64.f, 64.f}, brush);
     EXPECT_TRUE(checkResult("radialGradientFill"));
 }
 
@@ -531,7 +531,7 @@ TEST_F(DrawingTest, RadialGradientFill)
 TEST_F(DrawingTest, DrawTextSimple)
 {
     auto tf    = makeTextFormat(12.f);
-    rt.drawTextU("Hello", tf, {2.f, 2.f, 62.f, 62.f}, rt.createSolidColorBrush(Colors::Black));
+    g.drawTextU("Hello", tf, {2.f, 2.f, 62.f, 62.f}, g.createSolidColorBrush(Colors::Black));
     EXPECT_TRUE(checkResult("drawTextSimple", 2));
 }
 
@@ -541,8 +541,8 @@ TEST_F(DrawingTest, DrawTextCentred)
     auto tf = makeTextFormat(12.f);
     tf.setTextAlignment(TextAlignment::Center);
     tf.setParagraphAlignment(ParagraphAlignment::Center);
-    auto brush = rt.createSolidColorBrush(Colors::Black);
-    rt.drawTextU("Hi", tf, {0.f, 0.f, 64.f, 64.f}, brush);
+    auto brush = g.createSolidColorBrush(Colors::Black);
+    g.drawTextU("Hi", tf, {0.f, 0.f, 64.f, 64.f}, brush);
     EXPECT_TRUE(checkResult("drawTextCentred", 2));
 }
 
@@ -550,8 +550,8 @@ TEST_F(DrawingTest, DrawTextCentred)
 TEST_F(DrawingTest, DrawTextBold)
 {
     auto tf    = makeTextFormat(12.f, "Arial", FontWeight::Bold);
-    auto brush = rt.createSolidColorBrush(Colors::Black);
-    rt.drawTextU("Bold", tf, {2.f, 2.f, 62.f, 62.f}, brush);
+    auto brush = g.createSolidColorBrush(Colors::Black);
+    g.drawTextU("Bold", tf, {2.f, 2.f, 62.f, 62.f}, brush);
     EXPECT_TRUE(checkResult("drawTextBold", 2));
 }
 
@@ -559,8 +559,8 @@ TEST_F(DrawingTest, DrawTextBold)
 TEST_F(DrawingTest, DrawTextLarge)
 {
     auto tf    = makeTextFormat(24.f);
-    auto brush = rt.createSolidColorBrush(Colors::Black);
-    rt.drawTextU("Ag", tf, {2.f, 2.f, 62.f, 62.f}, brush);
+    auto brush = g.createSolidColorBrush(Colors::Black);
+    g.drawTextU("Ag", tf, {2.f, 2.f, 62.f, 62.f}, brush);
     EXPECT_TRUE(checkResult("drawTextLarge", 2));
 }
 
@@ -569,21 +569,21 @@ TEST_F(DrawingTest, DrawTextMultiLine)
 {
     auto tf = makeTextFormat(10.f);
     tf.setWordWrapping(WordWrapping::Wrap);
-    auto brush = rt.createSolidColorBrush(Colors::Black);
-    rt.drawTextU("Line one\nLine two", tf, {2.f, 2.f, 62.f, 62.f}, brush);
+    auto brush = g.createSolidColorBrush(Colors::Black);
+    g.drawTextU("Line one\nLine two", tf, {2.f, 2.f, 62.f, 62.f}, brush);
     EXPECT_TRUE(checkResult("drawTextMultiLine", 40)); // inconsistant smoothing, on same windows system
 }
 
 // Coloured text on a coloured background.
 TEST_F(DrawingTest, DrawTextColoured)
 {
-    auto bgBrush   = rt.createSolidColorBrush(Colors::DarkBlue);
-    auto textBrush = rt.createSolidColorBrush(Colors::Yellow);
-    rt.fillRectangle({0.f, 0.f, 64.f, 64.f}, bgBrush);
+    auto bgBrush   = g.createSolidColorBrush(Colors::DarkBlue);
+    auto textBrush = g.createSolidColorBrush(Colors::Yellow);
+    g.fillRectangle({0.f, 0.f, 64.f, 64.f}, bgBrush);
     auto tf = makeTextFormat(14.f);
     tf.setTextAlignment(TextAlignment::Center);
     tf.setParagraphAlignment(ParagraphAlignment::Center);
-    rt.drawTextU("Test", tf, {0.f, 0.f, 64.f, 64.f}, textBrush);
+    g.drawTextU("Test", tf, {0.f, 0.f, 64.f, 64.f}, textBrush);
     EXPECT_TRUE(checkResult("drawTextColoured", 2));
 }
 
@@ -595,7 +595,7 @@ TEST_F(DrawingTest, DrawTextColoured)
 TEST_F(DrawingTest, BitmapBrushLine)
 {
     auto brush = makeCheckerboardBrush(Colors::DarkBlue, Colors::Yellow);
-    rt.drawLine({8.f, 8.f}, {56.f, 56.f}, brush, 8.0f);
+    g.drawLine({8.f, 8.f}, {56.f, 56.f}, brush, 8.0f);
     EXPECT_TRUE(checkResult("bitmapBrushLine"));
 }
 
@@ -603,7 +603,7 @@ TEST_F(DrawingTest, BitmapBrushLine)
 TEST_F(DrawingTest, BitmapBrushFillRectangle)
 {
     auto brush = makeCheckerboardBrush(Colors::DarkGreen, Colors::White);
-    rt.fillRectangle({4.f, 4.f, 60.f, 60.f}, brush);
+    g.fillRectangle({4.f, 4.f, 60.f, 60.f}, brush);
     EXPECT_TRUE(checkResult("bitmapBrushFillRectangle"));
 }
 
@@ -611,7 +611,7 @@ TEST_F(DrawingTest, BitmapBrushFillRectangle)
 TEST_F(DrawingTest, BitmapBrushFillEllipse)
 {
     auto brush = makeCheckerboardBrush(Colors::DarkRed, Colors::White);
-    rt.fillEllipse(gmpi::drawing::Ellipse{{32.f, 32.f}, 28.f, 28.f}, brush);
+    g.fillEllipse(gmpi::drawing::Ellipse{{32.f, 32.f}, 28.f, 28.f}, brush);
     EXPECT_TRUE(checkResult("bitmapBrushFillEllipse"));
 }
 
@@ -622,7 +622,7 @@ TEST_F(DrawingTest, BitmapBrushText)
     auto tf    = makeTextFormat(24.f);
     tf.setTextAlignment(TextAlignment::Center);
     tf.setParagraphAlignment(ParagraphAlignment::Center);
-    rt.drawTextU("Ag", tf, {0.f, 0.f, 64.f, 64.f}, brush);
+    g.drawTextU("Ag", tf, {0.f, 0.f, 64.f, 64.f}, brush);
     EXPECT_TRUE(checkResult("bitmapBrushText", 2));
 }
 
@@ -637,17 +637,17 @@ TEST_F(DrawingTest, LinearGradientLine)
         {0.f, Colors::Red},
         {1.f, Colors::Blue},
     }};
-    auto brush = rt.createLinearGradientBrush(stops, {0.f, 0.f}, {64.f, 0.f});
-    rt.drawLine({8.f, 8.f}, {56.f, 56.f}, brush, 8.0f);
+    auto brush = g.createLinearGradientBrush(stops, {0.f, 0.f}, {64.f, 0.f});
+    g.drawLine({8.f, 8.f}, {56.f, 56.f}, brush, 8.0f);
     EXPECT_TRUE(checkResult("linearGradientLine"));
 }
 
 // Stroke a thick line with a radial gradient (useful for glowing effects).
 TEST_F(DrawingTest, RadialGradientLine)
 {
-    auto brush = rt.createRadialGradientBrush(
+    auto brush = g.createRadialGradientBrush(
         {32.f, 32.f}, 40.f, Colors::White, Colors::DarkBlue);
-    rt.drawLine({8.f, 8.f}, {56.f, 56.f}, brush, 8.0f);
+    g.drawLine({8.f, 8.f}, {56.f, 56.f}, brush, 8.0f);
     EXPECT_TRUE(checkResult("radialGradientLine"));
 }
 
@@ -658,23 +658,23 @@ TEST_F(DrawingTest, LinearGradientText)
         {0.f, Colors::Red},
         {1.f, Colors::Blue},
     }};
-    auto brush = rt.createLinearGradientBrush(stops, {0.f, 0.f}, {64.f, 0.f});
+    auto brush = g.createLinearGradientBrush(stops, {0.f, 0.f}, {64.f, 0.f});
     auto tf = makeTextFormat(24.f);
     tf.setTextAlignment(TextAlignment::Center);
     tf.setParagraphAlignment(ParagraphAlignment::Center);
-    rt.drawTextU("Ag", tf, {0.f, 0.f, 64.f, 64.f}, brush);
+    g.drawTextU("Ag", tf, {0.f, 0.f, 64.f, 64.f}, brush);
     EXPECT_TRUE(checkResult("linearGradientText", 2));
 }
 
 // Draw large text with a radial gradient foreground.
 TEST_F(DrawingTest, RadialGradientText)
 {
-    auto brush = rt.createRadialGradientBrush(
+    auto brush = g.createRadialGradientBrush(
         {32.f, 32.f}, 32.f, Colors::Yellow, Colors::DarkRed);
     auto tf = makeTextFormat(24.f);
     tf.setTextAlignment(TextAlignment::Center);
     tf.setParagraphAlignment(ParagraphAlignment::Center);
-    rt.drawTextU("Ag", tf, {0.f, 0.f, 64.f, 64.f}, brush);
+    g.drawTextU("Ag", tf, {0.f, 0.f, 64.f, 64.f}, brush);
     EXPECT_TRUE(checkResult("radialGradientText", 2));
 }
 
@@ -685,44 +685,69 @@ TEST_F(DrawingTest, RadialGradientText)
 // Semi-transparent fill blended over a solid background.
 TEST_F(DrawingTest, TransparentFill)
 {
-    auto bgBrush  = rt.createSolidColorBrush(Colors::DarkBlue);
-    auto fgBrush  = rt.createSolidColorBrush(colorFromHex(0xFF4500u, 0.5f)); // OrangeRed 50%
-    rt.fillRectangle({0.f, 0.f, 64.f, 64.f}, bgBrush);
-    rt.fillRectangle({8.f, 8.f, 56.f, 56.f}, fgBrush);
+    auto bgBrush  = g.createSolidColorBrush(Colors::DarkBlue);
+    auto fgBrush  = g.createSolidColorBrush(colorFromHex(0xFF4500u, 0.5f)); // OrangeRed 50%
+    g.fillRectangle({0.f, 0.f, 64.f, 64.f}, bgBrush);
+    g.fillRectangle({8.f, 8.f, 56.f, 56.f}, fgBrush);
     EXPECT_TRUE(checkResult("transparentFill"));
 }
 
 // Two semi-transparent shapes overlapping — tests additive blending order.
 TEST_F(DrawingTest, TransparentOverlap)
 {
-    auto red   = rt.createSolidColorBrush(colorFromHex(0xFF0000u, 0.6f));
-    auto blue  = rt.createSolidColorBrush(colorFromHex(0x0000FFu, 0.6f));
-    rt.fillEllipse(gmpi::drawing::Ellipse{{24.f, 32.f}, 20.f, 20.f}, red);
-    rt.fillEllipse(gmpi::drawing::Ellipse{{40.f, 32.f}, 20.f, 20.f}, blue);
+    auto red   = g.createSolidColorBrush(colorFromHex(0xFF0000u, 0.6f));
+    auto blue  = g.createSolidColorBrush(colorFromHex(0x0000FFu, 0.6f));
+    g.fillEllipse(gmpi::drawing::Ellipse{{24.f, 32.f}, 20.f, 20.f}, red);
+    g.fillEllipse(gmpi::drawing::Ellipse{{40.f, 32.f}, 20.f, 20.f}, blue);
     EXPECT_TRUE(checkResult("transparentOverlap"));
 }
 
 // Semi-transparent stroke over a filled rectangle.
 TEST_F(DrawingTest, TransparentStroke)
 {
-    auto fill   = rt.createSolidColorBrush(Colors::SteelBlue);
-    auto stroke = rt.createSolidColorBrush(colorFromHex(0x000000u, 0.4f)); // 40% black
-    rt.fillRectangle({4.f, 4.f, 60.f, 60.f}, fill);
-    rt.drawRectangle({12.f, 12.f, 52.f, 52.f}, stroke, 6.0f);
+    auto fill   = g.createSolidColorBrush(Colors::SteelBlue);
+    auto stroke = g.createSolidColorBrush(colorFromHex(0x000000u, 0.4f)); // 40% black
+    g.fillRectangle({4.f, 4.f, 60.f, 60.f}, fill);
+    g.drawRectangle({12.f, 12.f, 52.f, 52.f}, stroke, 6.0f);
     EXPECT_TRUE(checkResult("transparentStroke"));
 }
 
 // Semi-transparent text over a coloured background.
 TEST_F(DrawingTest, TransparentText)
 {
-    auto bgBrush   = rt.createSolidColorBrush(Colors::Tomato);
-    auto textBrush = rt.createSolidColorBrush(colorFromHex(0xFFFFFFu, 0.6f)); // 60% white
-    rt.fillRectangle({0.f, 0.f, 64.f, 64.f}, bgBrush);
+    auto bgBrush   = g.createSolidColorBrush(Colors::Tomato);
+    auto textBrush = g.createSolidColorBrush(colorFromHex(0xFFFFFFu, 0.6f)); // 60% white
+    g.fillRectangle({0.f, 0.f, 64.f, 64.f}, bgBrush);
     auto tf = makeTextFormat(24.f);
     tf.setTextAlignment(TextAlignment::Center);
     tf.setParagraphAlignment(ParagraphAlignment::Center);
-    rt.drawTextU("Ag", tf, {0.f, 0.f, 64.f, 64.f}, textBrush);
+    g.drawTextU("Ag", tf, {0.f, 0.f, 64.f, 64.f}, textBrush);
     EXPECT_TRUE(checkResult("transparentText", 2));
+}
+
+// Three vertical stripes that should all look identical (50% grey):
+//   1. Solid 50% grey (128,128,128 fully opaque)
+//   2. 50% alpha white over black background
+//   3. 50% alpha black over white background
+TEST_F(DrawingTest, AlphaEquivalentGrey)
+{
+    // stripe 1: solid 50% grey
+    auto grey  = g.createSolidColorBrush(Color{0.5f, 0.5f, 0.5f, 1.0f});
+    g.fillRectangle({0.f, 0.f, 21.f, 64.f}, grey);
+
+    // stripe 2: black bg, then 50% alpha white on top
+    auto black = g.createSolidColorBrush(Colors::Black);
+    auto white50 = g.createSolidColorBrush(Color{1.f, 1.f, 1.f, 0.5f});
+    g.fillRectangle({21.f, 0.f, 43.f, 64.f}, black);
+    g.fillRectangle({21.f, 0.f, 43.f, 64.f}, white50);
+
+    // stripe 3: white bg, then 50% alpha black on top
+    auto white = g.createSolidColorBrush(Colors::White);
+    auto black50 = g.createSolidColorBrush(Color{0.f, 0.f, 0.f, 0.5f});
+    g.fillRectangle({43.f, 0.f, 64.f, 64.f}, white);
+    g.fillRectangle({43.f, 0.f, 64.f, 64.f}, black50);
+
+    EXPECT_TRUE(checkResult("alphaEquivalentGrey"));
 }
 
 // ============================================================
@@ -753,7 +778,7 @@ TEST_F(DrawingTest, DrawBitmapNative)
     auto bmp = patRT.getBitmap();
 
     // Draw centred, 1:1.
-    rt.drawBitmap(bmp, {24.f, 24.f, 40.f, 40.f}, {0.f, 0.f, 16.f, 16.f},
+    g.drawBitmap(bmp, {24.f, 24.f, 40.f, 40.f}, {0.f, 0.f, 16.f, 16.f},
                   1.0f, BitmapInterpolationMode::NearestNeighbor);
     EXPECT_TRUE(checkResult("drawBitmapNative"));
 }
@@ -776,7 +801,7 @@ TEST_F(DrawingTest, DrawBitmapStretched)
     auto bmp = patRT.getBitmap();
 
     // Stretch to 56x56 with nearest-neighbour (pixel-exact, no blending).
-    rt.drawBitmap(bmp, {4.f, 4.f, 60.f, 60.f}, {0.f, 0.f, 16.f, 16.f},
+    g.drawBitmap(bmp, {4.f, 4.f, 60.f, 60.f}, {0.f, 0.f, 16.f, 16.f},
                   1.0f, BitmapInterpolationMode::NearestNeighbor);
     EXPECT_TRUE(checkResult("drawBitmapStretched"));
 }
@@ -798,7 +823,7 @@ TEST_F(DrawingTest, DrawBitmapLinearInterp)
     patRT.endDraw();
     auto bmp = patRT.getBitmap();
 
-    rt.drawBitmap(bmp, {4.f, 4.f, 60.f, 60.f}, {0.f, 0.f, 16.f, 16.f},
+    g.drawBitmap(bmp, {4.f, 4.f, 60.f, 60.f}, {0.f, 0.f, 16.f, 16.f},
                   1.0f, BitmapInterpolationMode::Linear);
     EXPECT_TRUE(checkResult("drawBitmapLinearInterp"));
 }
@@ -821,7 +846,7 @@ TEST_F(DrawingTest, DrawBitmapCropped)
     auto bmp = patRT.getBitmap();
 
     // Source: top-right quadrant (green). Destination: stretched to most of the bitmap.
-    rt.drawBitmap(bmp, {4.f, 4.f, 60.f, 60.f}, {8.f, 0.f, 16.f, 8.f},
+    g.drawBitmap(bmp, {4.f, 4.f, 60.f, 60.f}, {8.f, 0.f, 16.f, 8.f},
                   1.0f, BitmapInterpolationMode::NearestNeighbor);
     EXPECT_TRUE(checkResult("drawBitmapCropped"));
 }
@@ -843,9 +868,9 @@ TEST_F(DrawingTest, DrawBitmapOpacity)
     patRT.endDraw();
     auto bmp = patRT.getBitmap();
 
-    auto bgBrush = rt.createSolidColorBrush(Colors::DarkSlateGray);
-    rt.fillRectangle({0.f, 0.f, 64.f, 64.f}, bgBrush);
-    rt.drawBitmap(bmp, {4.f, 4.f, 60.f, 60.f}, {0.f, 0.f, 16.f, 16.f},
+    auto bgBrush = g.createSolidColorBrush(Colors::DarkSlateGray);
+    g.fillRectangle({0.f, 0.f, 64.f, 64.f}, bgBrush);
+    g.drawBitmap(bmp, {4.f, 4.f, 60.f, 60.f}, {0.f, 0.f, 16.f, 16.f},
                   0.5f, BitmapInterpolationMode::NearestNeighbor);
     EXPECT_TRUE(checkResult("drawBitmapOpacity"));
 }
@@ -858,26 +883,26 @@ TEST_F(DrawingTest, DrawBitmapOpacity)
 // inner region should show the second colour.
 TEST_F(DrawingTest, ClipBasic)
 {
-    auto bgBrush = rt.createSolidColorBrush(Colors::SteelBlue);
-    auto fgBrush = rt.createSolidColorBrush(Colors::OrangeRed);
-    rt.fillRectangle({0.f, 0.f, 64.f, 64.f}, bgBrush);
-    rt.pushAxisAlignedClip({16.f, 16.f, 48.f, 48.f});
-    rt.fillRectangle({0.f, 0.f, 64.f, 64.f}, fgBrush); // only 16..48 visible
-    rt.popAxisAlignedClip();
+    auto bgBrush = g.createSolidColorBrush(Colors::SteelBlue);
+    auto fgBrush = g.createSolidColorBrush(Colors::OrangeRed);
+    g.fillRectangle({0.f, 0.f, 64.f, 64.f}, bgBrush);
+    g.pushAxisAlignedClip({16.f, 16.f, 48.f, 48.f});
+    g.fillRectangle({0.f, 0.f, 64.f, 64.f}, fgBrush); // only 16..48 visible
+    g.popAxisAlignedClip();
     EXPECT_TRUE(checkResult("clipBasic"));
 }
 
 // Two nested clips: only their intersection should receive the fill.
 TEST_F(DrawingTest, ClipNested)
 {
-    auto bgBrush = rt.createSolidColorBrush(Colors::DarkSlateGray);
-    auto fgBrush = rt.createSolidColorBrush(Colors::Yellow);
-    rt.fillRectangle({0.f, 0.f, 64.f, 64.f}, bgBrush);
-    rt.pushAxisAlignedClip({8.f,  8.f,  56.f, 56.f});
-    rt.pushAxisAlignedClip({20.f, 20.f, 64.f, 64.f}); // intersection: 20..56
-    rt.fillRectangle({0.f, 0.f, 64.f, 64.f}, fgBrush);
-    rt.popAxisAlignedClip();
-    rt.popAxisAlignedClip();
+    auto bgBrush = g.createSolidColorBrush(Colors::DarkSlateGray);
+    auto fgBrush = g.createSolidColorBrush(Colors::Yellow);
+    g.fillRectangle({0.f, 0.f, 64.f, 64.f}, bgBrush);
+    g.pushAxisAlignedClip({8.f,  8.f,  56.f, 56.f});
+    g.pushAxisAlignedClip({20.f, 20.f, 64.f, 64.f}); // intersection: 20..56
+    g.fillRectangle({0.f, 0.f, 64.f, 64.f}, fgBrush);
+    g.popAxisAlignedClip();
+    g.popAxisAlignedClip();
     EXPECT_TRUE(checkResult("clipNested"));
 }
 
@@ -888,20 +913,20 @@ TEST_F(DrawingTest, ClipNested)
 // Scale transform: a small rectangle appears stretched.
 TEST_F(DrawingTest, TransformScale)
 {
-    auto brush = rt.createSolidColorBrush(Colors::Tomato);
-    rt.setTransform(makeScale(2.f, 1.5f));
-    rt.fillRectangle({8.f, 8.f, 24.f, 24.f}, brush);
-    rt.setTransform(Matrix3x2{}); // identity
+    auto brush = g.createSolidColorBrush(Colors::Tomato);
+    g.setTransform(makeScale(2.f, 1.5f));
+    g.fillRectangle({8.f, 8.f, 24.f, 24.f}, brush);
+    g.setTransform(Matrix3x2{}); // identity
     EXPECT_TRUE(checkResult("transformScale"));
 }
 
 // Translation: draw at origin, transform shifts it.
 TEST_F(DrawingTest, TransformTranslate)
 {
-    auto brush = rt.createSolidColorBrush(Colors::DodgerBlue);
-    rt.setTransform(makeTranslation(20.f, 16.f));
-    rt.fillRectangle({0.f, 0.f, 20.f, 20.f}, brush);
-    rt.setTransform(Matrix3x2{});
+    auto brush = g.createSolidColorBrush(Colors::DodgerBlue);
+    g.setTransform(makeTranslation(20.f, 16.f));
+    g.fillRectangle({0.f, 0.f, 20.f, 20.f}, brush);
+    g.setTransform(Matrix3x2{});
     EXPECT_TRUE(checkResult("transformTranslate"));
 }
 
@@ -909,22 +934,22 @@ TEST_F(DrawingTest, TransformTranslate)
 TEST_F(DrawingTest, TransformRotate)
 {
     constexpr float kPi = 3.14159265f;
-    auto brush = rt.createSolidColorBrush(Colors::Orchid);
-    rt.setTransform(makeRotation(kPi / 4.f, {32.f, 32.f}));
-    rt.fillRectangle({20.f, 20.f, 44.f, 44.f}, brush);
-    rt.setTransform(Matrix3x2{});
+    auto brush = g.createSolidColorBrush(Colors::Orchid);
+    g.setTransform(makeRotation(kPi / 4.f, {32.f, 32.f}));
+    g.fillRectangle({20.f, 20.f, 44.f, 44.f}, brush);
+    g.setTransform(Matrix3x2{});
     EXPECT_TRUE(checkResult("transformRotate"));
 }
 
 // Draw with a transform then reset — both shapes should be visible.
 TEST_F(DrawingTest, TransformReset)
 {
-    auto red  = rt.createSolidColorBrush(Colors::Red);
-    auto blue = rt.createSolidColorBrush(Colors::Blue);
-    rt.setTransform(makeTranslation(0.f, 32.f));
-    rt.fillRectangle({0.f, 0.f, 32.f, 32.f}, red);  // lands at y=32..64
-    rt.setTransform(Matrix3x2{});
-    rt.fillRectangle({32.f, 0.f, 64.f, 32.f}, blue); // stays at x=32..64, y=0..32
+    auto red  = g.createSolidColorBrush(Colors::Red);
+    auto blue = g.createSolidColorBrush(Colors::Blue);
+    g.setTransform(makeTranslation(0.f, 32.f));
+    g.fillRectangle({0.f, 0.f, 32.f, 32.f}, red);  // lands at y=32..64
+    g.setTransform(Matrix3x2{});
+    g.fillRectangle({32.f, 0.f, 64.f, 32.f}, blue); // stays at x=32..64, y=0..32
     EXPECT_TRUE(checkResult("transformReset"));
 }
 
@@ -938,8 +963,8 @@ TEST_F(DrawingTest, StrokeStyleDash)
     StrokeStyleProperties props;
     props.dashStyle = DashStyle::Dash;
     auto strokeStyle = makeStrokeStyle(props);
-    auto brush = rt.createSolidColorBrush(Colors::DarkRed);
-    rt.drawLine({8.f, 32.f}, {56.f, 32.f}, brush, 4.f, strokeStyle);
+    auto brush = g.createSolidColorBrush(Colors::DarkRed);
+    g.drawLine({8.f, 32.f}, {56.f, 32.f}, brush, 4.f, strokeStyle);
     EXPECT_TRUE(checkResult("strokeStyleDash"));
 }
 
@@ -950,8 +975,8 @@ TEST_F(DrawingTest, StrokeStyleDot)
     props.dashStyle = DashStyle::Dot;
     props.lineCap   = CapStyle::Round;
     auto strokeStyle = makeStrokeStyle(props);
-    auto brush = rt.createSolidColorBrush(Colors::DarkGreen);
-    rt.drawLine({8.f, 32.f}, {56.f, 32.f}, brush, 4.f, strokeStyle);
+    auto brush = g.createSolidColorBrush(Colors::DarkGreen);
+    g.drawLine({8.f, 32.f}, {56.f, 32.f}, brush, 4.f, strokeStyle);
     EXPECT_TRUE(checkResult("strokeStyleDot"));
 }
 
@@ -961,8 +986,8 @@ TEST_F(DrawingTest, StrokeStyleRoundCap)
     StrokeStyleProperties props;
     props.lineCap = CapStyle::Round;
     auto strokeStyle = makeStrokeStyle(props);
-    auto brush = rt.createSolidColorBrush(Colors::DarkSlateBlue);
-    rt.drawLine({16.f, 32.f}, {48.f, 32.f}, brush, 8.f, strokeStyle);
+    auto brush = g.createSolidColorBrush(Colors::DarkSlateBlue);
+    g.drawLine({16.f, 32.f}, {48.f, 32.f}, brush, 8.f, strokeStyle);
     EXPECT_TRUE(checkResult("strokeStyleRoundCap"));
 }
 
@@ -972,8 +997,8 @@ TEST_F(DrawingTest, StrokeStyleSquareCap)
     StrokeStyleProperties props;
     props.lineCap = CapStyle::Square;
     auto strokeStyle = makeStrokeStyle(props);
-    auto brush = rt.createSolidColorBrush(Colors::Sienna);
-    rt.drawLine({16.f, 32.f}, {48.f, 32.f}, brush, 8.f, strokeStyle);
+    auto brush = g.createSolidColorBrush(Colors::Sienna);
+    g.drawLine({16.f, 32.f}, {48.f, 32.f}, brush, 8.f, strokeStyle);
     EXPECT_TRUE(checkResult("strokeStyleSquareCap"));
 }
 
@@ -983,8 +1008,8 @@ TEST_F(DrawingTest, StrokeStyleBevelJoin)
     StrokeStyleProperties props;
     props.lineJoin = LineJoin::Bevel;
     auto strokeStyle = makeStrokeStyle(props);
-    auto brush = rt.createSolidColorBrush(Colors::DarkOliveGreen);
-    rt.drawRectangle({12.f, 12.f, 52.f, 52.f}, brush, 8.f, strokeStyle);
+    auto brush = g.createSolidColorBrush(Colors::DarkOliveGreen);
+    g.drawRectangle({12.f, 12.f, 52.f, 52.f}, brush, 8.f, strokeStyle);
     EXPECT_TRUE(checkResult("strokeStyleBevelJoin"));
 }
 
@@ -994,8 +1019,8 @@ TEST_F(DrawingTest, StrokeStyleRoundJoin)
     StrokeStyleProperties props;
     props.lineJoin = LineJoin::Round;
     auto strokeStyle = makeStrokeStyle(props);
-    auto brush = rt.createSolidColorBrush(Colors::DarkMagenta);
-    rt.drawRectangle({12.f, 12.f, 52.f, 52.f}, brush, 8.f, strokeStyle);
+    auto brush = g.createSolidColorBrush(Colors::DarkMagenta);
+    g.drawRectangle({12.f, 12.f, 52.f, 52.f}, brush, 8.f, strokeStyle);
     EXPECT_TRUE(checkResult("strokeStyleRoundJoin"));
 }
 
@@ -1007,32 +1032,32 @@ TEST_F(DrawingTest, StrokeStyleRoundJoin)
 TEST_F(DrawingTest, EmptyStringText)
 {
     auto tf    = makeTextFormat(12.f);
-    auto brush = rt.createSolidColorBrush(Colors::Black);
-    rt.drawTextU("", tf, {2.f, 2.f, 62.f, 62.f}, brush);
+    auto brush = g.createSolidColorBrush(Colors::Black);
+    g.drawTextU("", tf, {2.f, 2.f, 62.f, 62.f}, brush);
     EXPECT_TRUE(checkResult("emptyStringText", 2));
 }
 
 // A fully transparent brush (alpha=0) should render nothing.
 TEST_F(DrawingTest, FullyTransparentBrush)
 {
-    auto brush = rt.createSolidColorBrush(colorFromHex(0xFF0000u, 0.0f)); // red, alpha=0
-    rt.fillRectangle({8.f, 8.f, 56.f, 56.f}, brush);
+    auto brush = g.createSolidColorBrush(colorFromHex(0xFF0000u, 0.0f)); // red, alpha=0
+    g.fillRectangle({8.f, 8.f, 56.f, 56.f}, brush);
     EXPECT_TRUE(checkResult("fullyTransparentBrush"));
 }
 
 // A rect larger than the render target is clamped to its bounds.
 TEST_F(DrawingTest, ShapeAtBoundary)
 {
-    auto brush = rt.createSolidColorBrush(Colors::DarkOrchid);
-    rt.fillRectangle({-8.f, -8.f, 72.f, 72.f}, brush);
+    auto brush = g.createSolidColorBrush(Colors::DarkOrchid);
+    g.fillRectangle({-8.f, -8.f, 72.f, 72.f}, brush);
     EXPECT_TRUE(checkResult("shapeAtBoundary"));
 }
 
 // Zero-width stroke — platform-defined; at minimum must not crash.
 TEST_F(DrawingTest, ZeroWidthStroke)
 {
-    auto brush = rt.createSolidColorBrush(Colors::Black);
-    rt.drawRectangle({8.f, 8.f, 56.f, 56.f}, brush, 0.0f);
+    auto brush = g.createSolidColorBrush(Colors::Black);
+    g.drawRectangle({8.f, 8.f, 56.f, 56.f}, brush, 0.0f);
     EXPECT_TRUE(checkResult("zeroWidthStroke"));
 }
 
@@ -1046,11 +1071,11 @@ TEST_F(DrawingTest, TextClippedByClipRect)
     auto tf    = makeTextFormat(24.f);
     tf.setTextAlignment(TextAlignment::Center);
     tf.setParagraphAlignment(ParagraphAlignment::Center);
-    auto brush = rt.createSolidColorBrush(Colors::Black);
+    auto brush = g.createSolidColorBrush(Colors::Black);
     // Only the top half of the bitmap is visible.
-    rt.pushAxisAlignedClip({0.f, 0.f, 64.f, 32.f});
-    rt.drawTextU("Ag", tf, {0.f, 0.f, 64.f, 64.f}, brush);
-    rt.popAxisAlignedClip();
+    g.pushAxisAlignedClip({0.f, 0.f, 64.f, 32.f});
+    g.drawTextU("Ag", tf, {0.f, 0.f, 64.f, 64.f}, brush);
+    g.popAxisAlignedClip();
     EXPECT_TRUE(checkResult("textClippedByClipRect", 2));
 }
 
@@ -1059,9 +1084,9 @@ TEST_F(DrawingTest, TextClippedByLayoutRect)
 {
     auto tf    = makeTextFormat(14.f);
     tf.setWordWrapping(WordWrapping::NoWrap);
-    auto brush = rt.createSolidColorBrush(Colors::Black);
+    auto brush = g.createSolidColorBrush(Colors::Black);
     // Layout rect is narrow — text overflows and is clipped on the right.
-    rt.drawTextU("ClipMe Right Edge", tf, {2.f, 22.f, 40.f, 42.f}, brush);
+    g.drawTextU("ClipMe Right Edge", tf, {2.f, 22.f, 40.f, 42.f}, brush);
     EXPECT_TRUE(checkResult("textClippedByLayoutRect", 34));
 }
 
@@ -1070,8 +1095,8 @@ TEST_F(DrawingTest, TextWrapOn)
 {
     auto tf = makeTextFormat(11.f);
     tf.setWordWrapping(WordWrapping::Wrap);
-    auto brush = rt.createSolidColorBrush(Colors::Black);
-    rt.drawTextU("The quick brown fox jumps", tf, {2.f, 2.f, 62.f, 62.f}, brush);
+    auto brush = g.createSolidColorBrush(Colors::Black);
+    g.drawTextU("The quick brown fox jumps", tf, {2.f, 2.f, 62.f, 62.f}, brush);
     EXPECT_TRUE(checkResult("textWrapOn", 34));
 }
 
@@ -1080,8 +1105,8 @@ TEST_F(DrawingTest, TextWrapOff)
 {
     auto tf = makeTextFormat(11.f);
     tf.setWordWrapping(WordWrapping::NoWrap);
-    auto brush = rt.createSolidColorBrush(Colors::Black);
-    rt.drawTextU("The quick brown fox jumps", tf, {2.f, 2.f, 62.f, 62.f}, brush);
+    auto brush = g.createSolidColorBrush(Colors::Black);
+    g.drawTextU("The quick brown fox jumps", tf, {2.f, 2.f, 62.f, 62.f}, brush);
     EXPECT_TRUE(checkResult("textWrapOff", 2));
 }
 
@@ -1090,9 +1115,9 @@ TEST_F(DrawingTest, TextClippedAtBottom)
 {
     auto tf = makeTextFormat(11.f);
     tf.setWordWrapping(WordWrapping::Wrap);
-    auto brush = rt.createSolidColorBrush(Colors::Black);
+    auto brush = g.createSolidColorBrush(Colors::Black);
     // Layout rect is only tall enough for 2 of the 4 lines.
-    rt.drawTextU("Line one\nLine two\nLine three\nLine four",
+    g.drawTextU("Line one\nLine two\nLine three\nLine four",
                  tf, {2.f, 2.f, 62.f, 28.f}, brush);
     EXPECT_TRUE(checkResult("textClippedAtBottom", 10));
 }
@@ -1107,7 +1132,7 @@ TEST_F(DrawingTest, BitmapBrushOriginAligned)
 {
     auto brush = makeCheckerboardBrush(Colors::DarkBlue, Colors::LightGray);
     // Rect starts at (0,0) — world origin — so tile boundaries coincide with rect edges.
-    rt.fillRectangle({0.f, 0.f, 64.f, 64.f}, brush);
+    g.fillRectangle({0.f, 0.f, 64.f, 64.f}, brush);
     EXPECT_TRUE(checkResult("bitmapBrushOriginAligned"));
 }
 
@@ -1118,7 +1143,7 @@ TEST_F(DrawingTest, BitmapBrushOriginOffset)
     auto brush = makeCheckerboardBrush(Colors::DarkBlue, Colors::LightGray);
     // Rect starts at (4,4): 4 pixels into the 8-pixel tile, so the corner pixel
     // comes from the middle of a tile rather than a tile boundary.
-    rt.fillRectangle({4.f, 4.f, 60.f, 60.f}, brush);
+    g.fillRectangle({4.f, 4.f, 60.f, 60.f}, brush);
     EXPECT_TRUE(checkResult("bitmapBrushOriginOffset"));
 }
 
@@ -1132,9 +1157,9 @@ TEST_F(DrawingTest, BitmapBrushOriginWithTransform)
     // With a (4,4) translation, drawing rect (0,0)-(56,56) is equivalent to
     // drawing at (4,4)-(60,60) in world space — the pattern tiles from world (0,0)
     // so the visible corner of the rect is 4 pixels into the first tile.
-    rt.setTransform(makeTranslation(4.f, 4.f));
-    rt.fillRectangle({0.f, 0.f, 56.f, 56.f}, brush);
-    rt.setTransform(Matrix3x2{});
+    g.setTransform(makeTranslation(4.f, 4.f));
+    g.fillRectangle({0.f, 0.f, 56.f, 56.f}, brush);
+    g.setTransform(Matrix3x2{});
     EXPECT_TRUE(checkResult("bitmapBrushOriginWithTransform"));
 }
 
@@ -1209,11 +1234,11 @@ void addSquareFigure(GeometrySink& sink, gmpi::drawing::Rect r, bool clockwise)
 // a ray from there crosses the path boundary an even number of times (2).
 TEST_F(DrawingTest, FillModeAlternateStar)
 {
-    auto geom  = makePentagram(rt, FillMode::Alternate);
-    auto brush = rt.createSolidColorBrush(Colors::SteelBlue);
-    rt.fillGeometry(geom, brush);
-    auto outline = rt.createSolidColorBrush(Colors::DarkSlateGray);
-    rt.drawGeometry(geom, outline, 1.f);
+    auto geom  = makePentagram(g, FillMode::Alternate);
+    auto brush = g.createSolidColorBrush(Colors::SteelBlue);
+    g.fillGeometry(geom, brush);
+    auto outline = g.createSolidColorBrush(Colors::DarkSlateGray);
+    g.drawGeometry(geom, outline, 1.f);
     EXPECT_TRUE(checkResult("fillModeAlternateStar"));
 }
 
@@ -1221,11 +1246,11 @@ TEST_F(DrawingTest, FillModeAlternateStar)
 // the entire star — including the inner pentagon — is filled solid.
 TEST_F(DrawingTest, FillModeWindingStar)
 {
-    auto geom  = makePentagram(rt, FillMode::Winding);
-    auto brush = rt.createSolidColorBrush(Colors::Tomato);
-    rt.fillGeometry(geom, brush);
-    auto outline = rt.createSolidColorBrush(Colors::DarkRed);
-    rt.drawGeometry(geom, outline, 1.f);
+    auto geom  = makePentagram(g, FillMode::Winding);
+    auto brush = g.createSolidColorBrush(Colors::Tomato);
+    g.fillGeometry(geom, brush);
+    auto outline = g.createSolidColorBrush(Colors::DarkRed);
+    g.drawGeometry(geom, outline, 1.f);
     EXPECT_TRUE(checkResult("fillModeWindingStar"));
 }
 
@@ -1235,17 +1260,17 @@ TEST_F(DrawingTest, FillModeWindingStar)
 // (a point inside crosses 2 contour boundaries → even → not filled).
 TEST_F(DrawingTest, FillModeAlternateNestedSquares)
 {
-    auto geom = rt.getFactory().createPathGeometry();
+    auto geom = g.getFactory().createPathGeometry();
     auto sink = geom.open();
     sink.setFillMode(FillMode::Alternate);
     addSquareFigure(sink, {8.f,  8.f,  56.f, 56.f}, true);  // outer CW
     addSquareFigure(sink, {20.f, 20.f, 44.f, 44.f}, true);  // inner CW — still a hole
     sink.close();
 
-    auto brush   = rt.createSolidColorBrush(Colors::CornflowerBlue);
-    auto outline = rt.createSolidColorBrush(Colors::DarkBlue);
-    rt.fillGeometry(geom, brush);
-    rt.drawGeometry(geom, outline, 1.f);
+    auto brush   = g.createSolidColorBrush(Colors::CornflowerBlue);
+    auto outline = g.createSolidColorBrush(Colors::DarkBlue);
+    g.fillGeometry(geom, brush);
+    g.drawGeometry(geom, outline, 1.f);
     EXPECT_TRUE(checkResult("fillModeAlternateNestedSquares"));
 }
 
@@ -1253,17 +1278,17 @@ TEST_F(DrawingTest, FillModeAlternateNestedSquares)
 // so the inner square IS filled (both regions have non-zero winding).
 TEST_F(DrawingTest, FillModeWindingNestedSameDir)
 {
-    auto geom = rt.getFactory().createPathGeometry();
+    auto geom = g.getFactory().createPathGeometry();
     auto sink = geom.open();
     sink.setFillMode(FillMode::Winding);
     addSquareFigure(sink, {8.f,  8.f,  56.f, 56.f}, true);   // outer CW
     addSquareFigure(sink, {20.f, 20.f, 44.f, 44.f}, true);   // inner CW  → winding=2, filled
     sink.close();
 
-    auto brush   = rt.createSolidColorBrush(Colors::DarkOrange);
-    auto outline = rt.createSolidColorBrush(Colors::Sienna);
-    rt.fillGeometry(geom, brush);
-    rt.drawGeometry(geom, outline, 1.f);
+    auto brush   = g.createSolidColorBrush(Colors::DarkOrange);
+    auto outline = g.createSolidColorBrush(Colors::Sienna);
+    g.fillGeometry(geom, brush);
+    g.drawGeometry(geom, outline, 1.f);
     EXPECT_TRUE(checkResult("fillModeWindingNestedSameDir"));
 }
 
@@ -1271,17 +1296,17 @@ TEST_F(DrawingTest, FillModeWindingNestedSameDir)
 // so the inner square becomes a hole — same visual as the Alternate case.
 TEST_F(DrawingTest, FillModeWindingNestedOppositeDir)
 {
-    auto geom = rt.getFactory().createPathGeometry();
+    auto geom = g.getFactory().createPathGeometry();
     auto sink = geom.open();
     sink.setFillMode(FillMode::Winding);
     addSquareFigure(sink, {8.f,  8.f,  56.f, 56.f}, true);   // outer CW
     addSquareFigure(sink, {20.f, 20.f, 44.f, 44.f}, false);  // inner CCW → winding=0, hole
     sink.close();
 
-    auto brush   = rt.createSolidColorBrush(Colors::MediumPurple);
-    auto outline = rt.createSolidColorBrush(Colors::DarkMagenta);
-    rt.fillGeometry(geom, brush);
-    rt.drawGeometry(geom, outline, 1.f);
+    auto brush   = g.createSolidColorBrush(Colors::MediumPurple);
+    auto outline = g.createSolidColorBrush(Colors::DarkMagenta);
+    g.fillGeometry(geom, brush);
+    g.drawGeometry(geom, outline, 1.f);
     EXPECT_TRUE(checkResult("fillModeWindingNestedOppositeDir"));
 }
 
