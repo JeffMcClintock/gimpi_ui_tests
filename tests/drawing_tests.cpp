@@ -422,9 +422,13 @@ protected:
     }
 
     // Core comparison helper — works with any already-ended BitmapRenderTarget.
+    // tolerance:      per-channel difference allowed before a pixel counts as differing.
+    // maxMeanDiff:    maximum allowed mean channel diff across ALL pixels (not just differing ones).
+    //                 A value of 0.0 disables the mean-diff check (strict mode).
     ::testing::AssertionResult checkBitmap(const std::string& testName,
                                            gmpi::drawing::BitmapRenderTarget& target,
-                                           int tolerance = 0)
+                                           int tolerance = 0,
+                                           double maxMeanDiff = 1.0)
     {
         auto bitmap = target.getBitmap();
 
@@ -552,51 +556,57 @@ protected:
             }
         }
 
+        const int    totalPixels  = static_cast<int>(ourSize.width * ourSize.height);
+        const double meanDiffAll  = static_cast<double>(totalDiff) / (totalPixels * 4);
+        const double meanDiffBad  = diffCount > 0 ? static_cast<double>(totalDiff) / (diffCount * 4) : 0.0;
+
+        // Always write the diff log and actual image for diagnostics.
         if (diffCount > 0)
         {
             savePng(actualPath, bitmap);
-
-            const int    totalPixels = static_cast<int>(ourSize.width * ourSize.height);
-            const double meanDiff    = static_cast<double>(totalDiff) / (diffCount * 4);
 
             const auto logPath = referenceDir() / (testName + "_diff.log");
             if (auto f = std::ofstream(logPath))
             {
                 f << "Test:              " << testName << "\n"
                   << "Tolerance:         " << tolerance << " / 255\n"
+                  << "maxMeanDiff:       " << maxMeanDiff << " / 255\n"
                   << "Differing pixels:  " << diffCount << " / " << totalPixels
                   << " (" << 100.0 * diffCount / totalPixels << "%)\n"
                   << "Max channel diff:  " << maxChanDiff << " / 255\n"
-                  << "Mean channel diff: " << meanDiff    << " / 255\n"
+                  << "Mean diff (all):   " << meanDiffAll  << " / 255\n"
+                  << "Mean diff (bad):   " << meanDiffBad  << " / 255\n"
                   << "Actual image:      " << actualPath.string() << "\n"
                   << "Reference image:   " << refPath.string()    << "\n";
             }
-
-            std::ostringstream msg;
-            msg << "Pixel mismatch: " << diffCount << "/" << totalPixels
-                << " pixels differ."
-                << " Max channel diff: " << maxChanDiff << "/255."
-                << " Mean diff: " << meanDiff << "/255."
-                << "\nActual image: " << actualPath.string()
-                << "\nDiff log:     " << logPath.string();
-            return ::testing::AssertionFailure() << msg.str();
         }
 
-        return ::testing::AssertionSuccess();
+        // Pass if the mean channel diff across the ENTIRE image is within the threshold.
+        if (meanDiffAll <= maxMeanDiff)
+            return ::testing::AssertionSuccess();
+
+        std::ostringstream msg;
+        msg << "Pixel mismatch: " << diffCount << "/" << totalPixels
+            << " pixels differ."
+            << " Max channel diff: " << maxChanDiff << "/255."
+            << " Mean diff (all): " << meanDiffAll << "/255 (limit: " << maxMeanDiff << ")."
+            << "\nActual image: " << actualPath.string()
+            << "\nDiff log:     " << (referenceDir() / (testName + "_diff.log")).string();
+        return ::testing::AssertionFailure() << msg.str();
     }
 
     // Convenience wrapper for the standard fixture render target.
     // Call at the end of each test (after all drawing is done).
     // tolerance: max allowed per-channel difference (0 = pixel-exact).
     // Use tolerance >= 2 for text tests to handle ClearType sub-pixel variation.
-    ::testing::AssertionResult checkResult(const std::string& testName, int tolerance = 0)
+    ::testing::AssertionResult checkResult(const std::string& testName, int tolerance = 0, double maxMeanDiff = 1.0)
     {
         if (drawingActive)
         {
             g.endDraw();
             drawingActive = false;
         }
-        return checkBitmap(testName, g, tolerance);
+        return checkBitmap(testName, g, tolerance, maxMeanDiff);
     }
 };
 
