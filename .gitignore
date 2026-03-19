@@ -1,0 +1,7 @@
+build/
+*.user
+.vs/
+out/
+# Test failure artefacts (not reference images)
+reference_images/*_actual.png
+reference_images/*_diff.log

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git ls-tree:*)",
+      "Bash(grep -r macro.*gmpi_plugin /c/SE/GMPI-plugins)",
+      "Bash(find C:/SE/gmpi_ui -name *test* -o -name CMakeLists.txt)"
+    ]
+  }
+}
