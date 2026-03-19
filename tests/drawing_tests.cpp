@@ -999,6 +999,153 @@ TEST_F(DrawingTest, BitmapBrushOriginWithTransform)
 }
 
 // ============================================================
+// Polygon fill rules
+// ============================================================
+//
+// The classic tests for FillMode::Alternate (even-odd) vs FillMode::Winding.
+//
+// Helper: build a pentagram (5-pointed star) as a self-intersecting closed path.
+// The outer tips are at radius r from centre (cx,cy), drawn by connecting every
+// other vertex of a regular pentagon.  The inner pentagon is visited twice, so
+// its winding number is 2 under the winding rule (filled) but 2 mod 2 = 0 under
+// the even-odd rule (hole).
+//
+// Helper: make a square contour (4 vertices, Y-down screen coords).
+//   CW  in screen space: TL→TR→BR→BL
+//   CCW in screen space: TL→BL→BR→TR
+
+namespace {
+
+PathGeometry makePentagram(gmpi::drawing::BitmapRenderTarget& rt, FillMode fm)
+{
+    constexpr float cx = 32.f, cy = 32.f, r = 28.f;
+    constexpr float kPi = 3.14159265f;
+    auto pt = [&](float deg) -> Point {
+        const float rad = deg * kPi / 180.f;
+        return {cx + r * std::cos(rad), cy + r * std::sin(rad)};
+    };
+
+    auto geom = rt.getFactory().createPathGeometry();
+    auto sink = geom.open();
+    sink.setFillMode(fm);
+    // Skip every other vertex: 0°-indexed from top (-90°), step 144°
+    sink.beginFigure(pt(-90.f), FigureBegin::Filled);
+    sink.addLine(pt(-90.f + 144.f));
+    sink.addLine(pt(-90.f + 288.f));
+    sink.addLine(pt(-90.f + 432.f));
+    sink.addLine(pt(-90.f + 576.f));
+    sink.endFigure(FigureEnd::Closed);
+    sink.close();
+    return geom;
+}
+
+// Square contour helper.
+// clockwise=true  → TL→TR→BR→BL  (positive winding in screen/Y-down space)
+// clockwise=false → TL→BL→BR→TR  (negative winding)
+void addSquareFigure(GeometrySink& sink, Rect r, bool clockwise)
+{
+    if (clockwise)
+    {
+        sink.beginFigure({r.left,  r.top},    FigureBegin::Filled);
+        sink.addLine    ({r.right, r.top});
+        sink.addLine    ({r.right, r.bottom});
+        sink.addLine    ({r.left,  r.bottom});
+    }
+    else
+    {
+        sink.beginFigure({r.left,  r.top},    FigureBegin::Filled);
+        sink.addLine    ({r.left,  r.bottom});
+        sink.addLine    ({r.right, r.bottom});
+        sink.addLine    ({r.right, r.top});
+    }
+    sink.endFigure(FigureEnd::Closed);
+}
+
+} // anonymous namespace
+
+// ---- Stars ----
+
+// Pentagram with Alternate (even-odd) fill: the inner pentagon is a hole because
+// a ray from there crosses the path boundary an even number of times (2).
+TEST_F(DrawingTest, FillModeAlternateStar)
+{
+    auto geom  = makePentagram(rt, FillMode::Alternate);
+    auto brush = rt.createSolidColorBrush(Colors::SteelBlue);
+    rt.fillGeometry(geom, brush);
+    auto outline = rt.createSolidColorBrush(Colors::DarkSlateGray);
+    rt.drawGeometry(geom, outline, 1.f);
+    EXPECT_TRUE(checkResult("fillModeAlternateStar"));
+}
+
+// Same pentagram with Winding fill: every region has non-zero winding number so
+// the entire star — including the inner pentagon — is filled solid.
+TEST_F(DrawingTest, FillModeWindingStar)
+{
+    auto geom  = makePentagram(rt, FillMode::Winding);
+    auto brush = rt.createSolidColorBrush(Colors::Tomato);
+    rt.fillGeometry(geom, brush);
+    auto outline = rt.createSolidColorBrush(Colors::DarkRed);
+    rt.drawGeometry(geom, outline, 1.f);
+    EXPECT_TRUE(checkResult("fillModeWindingStar"));
+}
+
+// ---- Nested squares ----
+
+// Alternate rule: inner square always becomes a hole regardless of direction
+// (a point inside crosses 2 contour boundaries → even → not filled).
+TEST_F(DrawingTest, FillModeAlternateNestedSquares)
+{
+    auto geom = rt.getFactory().createPathGeometry();
+    auto sink = geom.open();
+    sink.setFillMode(FillMode::Alternate);
+    addSquareFigure(sink, {8.f,  8.f,  56.f, 56.f}, true);  // outer CW
+    addSquareFigure(sink, {20.f, 20.f, 44.f, 44.f}, true);  // inner CW — still a hole
+    sink.close();
+
+    auto brush   = rt.createSolidColorBrush(Colors::CornflowerBlue);
+    auto outline = rt.createSolidColorBrush(Colors::DarkBlue);
+    rt.fillGeometry(geom, brush);
+    rt.drawGeometry(geom, outline, 1.f);
+    EXPECT_TRUE(checkResult("fillModeAlternateNestedSquares"));
+}
+
+// Winding rule, both squares CW: inner winding = 2 (outer CW + inner CW adds),
+// so the inner square IS filled (both regions have non-zero winding).
+TEST_F(DrawingTest, FillModeWindingNestedSameDir)
+{
+    auto geom = rt.getFactory().createPathGeometry();
+    auto sink = geom.open();
+    sink.setFillMode(FillMode::Winding);
+    addSquareFigure(sink, {8.f,  8.f,  56.f, 56.f}, true);   // outer CW
+    addSquareFigure(sink, {20.f, 20.f, 44.f, 44.f}, true);   // inner CW  → winding=2, filled
+    sink.close();
+
+    auto brush   = rt.createSolidColorBrush(Colors::DarkOrange);
+    auto outline = rt.createSolidColorBrush(Colors::Sienna);
+    rt.fillGeometry(geom, brush);
+    rt.drawGeometry(geom, outline, 1.f);
+    EXPECT_TRUE(checkResult("fillModeWindingNestedSameDir"));
+}
+
+// Winding rule, outer CW + inner CCW: the inner winding cancels to 0,
+// so the inner square becomes a hole — same visual as the Alternate case.
+TEST_F(DrawingTest, FillModeWindingNestedOppositeDir)
+{
+    auto geom = rt.getFactory().createPathGeometry();
+    auto sink = geom.open();
+    sink.setFillMode(FillMode::Winding);
+    addSquareFigure(sink, {8.f,  8.f,  56.f, 56.f}, true);   // outer CW
+    addSquareFigure(sink, {20.f, 20.f, 44.f, 44.f}, false);  // inner CCW → winding=0, hole
+    sink.close();
+
+    auto brush   = rt.createSolidColorBrush(Colors::MediumPurple);
+    auto outline = rt.createSolidColorBrush(Colors::DarkMagenta);
+    rt.fillGeometry(geom, brush);
+    rt.drawGeometry(geom, outline, 1.f);
+    EXPECT_TRUE(checkResult("fillModeWindingNestedOppositeDir"));
+}
+
+// ============================================================
 // Font metrics visualisation  (256 × 120 render target)
 // ============================================================
 //
