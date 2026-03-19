@@ -434,6 +434,11 @@ protected:
 
         const auto refPath    = referenceDir() / (testName + ".png");
         const auto actualPath = referenceDir() / (testName + "_actual.png");
+        const auto logPath    = referenceDir() / (testName + "_diff.log");
+
+        // Remove stale artifacts from previous failures.
+        std::filesystem::remove(actualPath);
+        std::filesystem::remove(logPath);
 
         // Try to load the reference image.
         gmpi::drawing::Bitmap refBitmap;
@@ -560,12 +565,15 @@ protected:
         const double meanDiffAll  = static_cast<double>(totalDiff) / (totalPixels * 4);
         const double meanDiffBad  = diffCount > 0 ? static_cast<double>(totalDiff) / (diffCount * 4) : 0.0;
 
-        // Always write the diff log and actual image for diagnostics.
+        // Pass if the mean channel diff across the ENTIRE image is within the threshold.
+        if (meanDiffAll <= maxMeanDiff)
+            return ::testing::AssertionSuccess();
+
+        // Write the diff log and actual image for failed tests.
         if (diffCount > 0)
         {
             savePng(actualPath, bitmap);
 
-            const auto logPath = referenceDir() / (testName + "_diff.log");
             if (auto f = std::ofstream(logPath))
             {
                 f << "Test:              " << testName << "\n"
@@ -581,17 +589,13 @@ protected:
             }
         }
 
-        // Pass if the mean channel diff across the ENTIRE image is within the threshold.
-        if (meanDiffAll <= maxMeanDiff)
-            return ::testing::AssertionSuccess();
-
         std::ostringstream msg;
         msg << "Pixel mismatch: " << diffCount << "/" << totalPixels
             << " pixels differ."
             << " Max channel diff: " << maxChanDiff << "/255."
             << " Mean diff (all): " << meanDiffAll << "/255 (limit: " << maxMeanDiff << ")."
             << "\nActual image: " << actualPath.string()
-            << "\nDiff log:     " << (referenceDir() / (testName + "_diff.log")).string();
+            << "\nDiff log:     " << logPath.string();
         return ::testing::AssertionFailure() << msg.str();
     }
 
