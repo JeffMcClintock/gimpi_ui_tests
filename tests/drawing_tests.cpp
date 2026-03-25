@@ -68,6 +68,24 @@ static uint8_t linearToSRGB(uint8_t v)
     return linearToSRGB_f(v / 255.0f);
 }
 
+// float → IEEE 754 half-precision.
+static uint16_t floatToHalf(float f)
+{
+    uint32_t bits; std::memcpy(&bits, &f, 4);
+    uint16_t sign = static_cast<uint16_t>((bits >> 16) & 0x8000u);
+    int32_t  exp  = static_cast<int32_t>((bits >> 23) & 0xffu) - 127 + 15;
+    uint32_t mant = bits & 0x7fffffu;
+    if ((bits & 0x7fffffffu) > 0x7f800000u) return sign | 0x7e00u; // NaN
+    if (exp >= 31) return sign | 0x7c00u;                           // Inf / overflow
+    if (exp <= 0) {
+        if (exp < -10) return sign;                                 // underflow → ±0
+        mant |= 0x800000u;
+        int shift = 14 - exp;
+        return sign | static_cast<uint16_t>((mant + (1u << (shift - 1))) >> shift);
+    }
+    return sign | static_cast<uint16_t>((static_cast<uint32_t>(exp) << 10) | (mant >> 13));
+}
+
 // IEEE 754 half-precision float → float.
 static float halfToFloat(uint16_t h)
 {
@@ -1784,13 +1802,16 @@ TEST_F(DrawingTest, BlurNeumorphicBump)
 }
 
 // Neumorphic "dip" — recessed rounded rectangle with inner shadows.
-// Achieved by drawing shadow shapes that overlap the interior edges,
-// then clipping to the rounded-rect region so shadows appear only inside.
+// Shadows are rendered to an offscreen target, then a shape mask is applied
+// pixel-by-pixel so shadows are clipped to the interior without overpainting
+// the background — works correctly regardless of what the background contains.
+
+#if 0 // Jeffs. cheats on the clipping by just filling teh outer area with teh BG color.
 TEST_F(DrawingTest, BlurNeumorphicDip)
 {
     constexpr uint32_t kW = 128, kH = 128;
     auto factory = g.getFactory();
-    auto bigRT = factory.createCpuRenderTarget({kW, kH}, kRenderFlags);
+    auto bigRT = factory.createCpuRenderTarget({ kW, kH }, kRenderFlags);
     bigRT.beginDraw();
     {
         Graphics gRT(AccessPtr::get(bigRT));
@@ -1814,7 +1835,7 @@ TEST_F(DrawingTest, BlurNeumorphicDip)
                                  shape.radiusX, shape.radiusY });
             sink.close();
             return geom;
-        };
+            };
 
         // draw the shadow.
         auto darkGeom = makeHoleGeometry(offset, offset);
@@ -1837,9 +1858,146 @@ TEST_F(DrawingTest, BlurNeumorphicDip)
 
         // mask off everything outside the dip;
         auto maskGeom = makeHoleGeometry(0, 0);
-		gRT.fillGeometry(maskGeom, gRT.createSolidColorBrush(bgColor));
+        gRT.fillGeometry(maskGeom, gRT.createSolidColorBrush(bgColor));
     }
     bigRT.endDraw();
 
     EXPECT_TRUE(checkBitmap("blurNeumorphicDip", bigRT, 2));
 }
+#else // Clauds doubtful attempt. not sure we need 15 bits per pixel for the clip mask.
+TEST_F(DrawingTest, BlurNeumorphicDip)
+{
+    constexpr uint32_t kW = 128, kH = 128;
+    // EightBitPixels + CpuReadable for the offscreen targets we'll lock.
+    constexpr int32_t kEightBit = (int32_t)BitmapRenderTargetFlags::EightBitPixels
+                                | (int32_t)BitmapRenderTargetFlags::CpuReadable;
+
+    auto factory = g.getFactory();
+    auto bigRT = factory.createCpuRenderTarget({kW, kH}, kRenderFlags);
+    bigRT.beginDraw();
+    {
+        Graphics gRT(AccessPtr::get(bigRT));
+
+        const Color bgColor = colorFromHex(0xE0E0E0u);
+        bigRT.clear(bgColor);
+
+        const RoundedRect shape{ {24.f, 24.f, 104.f, 104.f}, 16.f, 16.f };
+        const Rect bounds{ 0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH) };
+        constexpr float offset = 4.f;
+
+        // helper: full-canvas rect with a shifted rounded-rect hole punched out
+        auto makeHoleGeom = [&](Graphics& ctx, float dx, float dy) {
+            auto geom = ctx.getFactory().createPathGeometry();
+            auto sink = geom.open();
+            sink.setFillMode(FillMode::Alternate);
+            sink.addRect({ 0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH) }, FigureBegin::Filled);
+            sink.addRoundedRect({ {shape.rect.left  + dx, shape.rect.top    + dy,
+                                   shape.rect.right + dx, shape.rect.bottom + dy},
+                                  shape.radiusX, shape.radiusY });
+            sink.close();
+            return geom;
+        };
+
+        // --- 1. Render inner shadow layers to a separate render target ---
+        // Use the same format as bigRT (kRenderFlags) so cachedBlur's compositing
+        // colour-space matches exactly, producing identical shadow pixels inside
+        // the shape to the reference.
+        auto shadowRT = factory.createCpuRenderTarget({kW, kH}, kRenderFlags);
+        shadowRT.beginDraw();
+        shadowRT.clear(Color{0.f, 0.f, 0.f, 0.f}); // transparent
+        {
+            Graphics gShadow(AccessPtr::get(shadowRT));
+
+            cachedBlur innerDark;
+            innerDark.tint = Color{ 0.f, 0.f, 0.f, 0.5f };
+            innerDark.draw(gShadow, bounds, [&](Graphics& m) {
+                auto darkGeom = makeHoleGeom(m, offset, offset);
+                auto brush = m.createSolidColorBrush(Colors::White);
+                m.fillGeometry(darkGeom, brush);
+            });
+
+            cachedBlur innerLight;
+            innerLight.tint = Color{ 1.f, 1.f, 1.f, 0.8f };
+            innerLight.draw(gShadow, bounds, [&](Graphics& m) {
+                auto lightGeom = makeHoleGeom(m, -offset, -offset);
+                auto brush = m.createSolidColorBrush(Colors::White);
+                m.fillGeometry(lightGeom, brush);
+            });
+        }
+        shadowRT.endDraw();
+
+        // --- 2. Render shape mask: white inside rounded rect, black outside ---
+        // EightBitPixels so the mask bytes are simple uint8 BGRA.
+        auto maskRT = factory.createCpuRenderTarget({kW, kH}, kEightBit);
+        maskRT.beginDraw();
+        maskRT.clear(Colors::Black);
+        {
+            Graphics gMask(AccessPtr::get(maskRT));
+            auto whiteBrush = gMask.createSolidColorBrush(Colors::White);
+            gMask.fillRoundedRectangle(shape, whiteBrush);
+        }
+        maskRT.endDraw();
+
+        // --- 3. Clip shadow to shape interior by modifying alpha only ---
+        // Inside the shape mask=1 → alpha unchanged.
+        // Outside mask=0 → alpha zeroed → pixel becomes transparent.
+        // At AA edges fractional mask values produce a smooth transition.
+        // shadowRT may be 64bppPRGBAHalf (8 bpp, alpha at h[3] = bytes [6:7])
+        // or 32bppPBGRA (4 bpp, alpha at byte [3]) depending on kRenderFlags.
+        {
+            auto shadowBmp = shadowRT.getBitmap();
+            auto maskBmp   = maskRT.getBitmap();
+
+            auto shadowPx = shadowBmp.lockPixels(BitmapLockFlags::ReadWrite);
+            auto maskPx   = maskBmp.lockPixels(BitmapLockFlags::Read);
+
+            uint8_t*       shadowData = shadowPx.getAddress();
+            const uint8_t* maskData   = maskPx.getAddress();
+            const int32_t  shadowBpr  = shadowPx.getBytesPerRow();
+            const int32_t  maskBpr    = maskPx.getBytesPerRow();
+            const int32_t  shadowBpp  = shadowBpr / static_cast<int32_t>(kW);
+
+            for (uint32_t y = 0; y < kH; ++y)
+            {
+                for (uint32_t x = 0; x < kW; ++x)
+                {
+                    // Mask: blue channel [0] = 255 inside shape, 0 outside (BGRA).
+                    const float maskVal = maskData[y * maskBpr + x * 4] / 255.0f;
+                    if (maskVal >= 1.0f) continue; // fully inside: nothing to do
+
+                    uint8_t* sp = shadowData + y * shadowBpr + x * shadowBpp;
+
+                    if (shadowBpp == 8)
+                    {
+                        // 64bppPRGBAHalf: premultiplied RGBA, scale all 4 channels
+                        // so that both colour and alpha are attenuated consistently.
+                        uint16_t ch[4]; std::memcpy(ch, sp, 8);
+                        for (int c = 0; c < 4; ++c)
+                        {
+                            float v = halfToFloat(ch[c]) * maskVal;
+                            ch[c]   = floatToHalf(v);
+                        }
+                        std::memcpy(sp, ch, 8);
+                    }
+                    else
+                    {
+                        // 32bppPBGRA: premultiplied BGRA, scale all 4 channels.
+                        for (int c = 0; c < 4; ++c)
+                            sp[c] = static_cast<uint8_t>(sp[c] * maskVal + 0.5f);
+                    }
+                }
+            }
+            // shadowPx / maskPx unlock here via RAII
+        }
+
+        // --- 4. Composite the masked shadow overlay onto bigRT ---
+        {
+            auto shadowBmp = shadowRT.getBitmap();
+            gRT.drawBitmap(shadowBmp, bounds, bounds);
+        }
+    }
+    bigRT.endDraw();
+
+    EXPECT_TRUE(checkBitmap("blurNeumorphicDip", bigRT, 2));
+}
+#endif
