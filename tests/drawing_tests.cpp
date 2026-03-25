@@ -40,6 +40,7 @@
 #include "backends/CocoaGfx.h"
 #endif
 #include "Drawing.h"
+#include "helpers/CachedBlur.h"
 
 using namespace gmpi::drawing;
 using namespace gmpi::drawing::Colors;
@@ -338,10 +339,10 @@ protected:
     static constexpr int32_t kRenderFlags = 0;
 
 #ifdef _WIN32
-    std::unique_ptr<gmpi::directx::Factory> dxFactory;
+    std::unique_ptr<gmpi::directx::Factory> drawingFactory;
 #endif
 #ifdef __APPLE__
-    std::unique_ptr<gmpi::cocoa::Factory> dxFactory;
+    std::unique_ptr<gmpi::cocoa::Factory> drawingFactory;
 #endif
     gmpi::drawing::BitmapRenderTarget g;
     bool drawingActive = false;
@@ -355,12 +356,12 @@ protected:
     {
 #ifdef _WIN32
         CoInitialize(nullptr);
-        dxFactory = std::make_unique<gmpi::directx::Factory>();
+        drawingFactory = std::make_unique<gmpi::directx::Factory>();
 #endif
 #ifdef __APPLE__
         dxFactory = std::make_unique<gmpi::cocoa::Factory>();
 #endif
-        dxFactory->createCpuRenderTarget({kWidth, kHeight}, kRenderFlags, AccessPtr::put(g));
+        drawingFactory->createCpuRenderTarget({kWidth, kHeight}, kRenderFlags, AccessPtr::put(g));
         g.beginDraw();
         drawingActive = true;
         g.clear(Colors::White);
@@ -383,7 +384,7 @@ protected:
         FontStretch        stretch = FontStretch::Normal)
     {
         TextFormat tf;
-        dxFactory->createTextFormat(
+        drawingFactory->createTextFormat(
             family, weight, style, stretch, height,
             static_cast<int32_t>(FontFlags::BodyHeight),
             AccessPtr::put(tf));
@@ -397,7 +398,7 @@ protected:
     {
         constexpr uint32_t kPat = 8;
         gmpi::drawing::BitmapRenderTarget patRT;
-        dxFactory->createCpuRenderTarget({kPat, kPat}, kRenderFlags, AccessPtr::put(patRT));
+        drawingFactory->createCpuRenderTarget({kPat, kPat}, kRenderFlags, AccessPtr::put(patRT));
         patRT.beginDraw();
         patRT.clear(color1);
         auto b2 = patRT.createSolidColorBrush(color2);
@@ -415,7 +416,7 @@ protected:
             g.endDraw();
         // Release rt before factory to avoid dangling pointer.
         g = gmpi::drawing::BitmapRenderTarget{};
-        dxFactory.reset();
+        drawingFactory.reset();
 #ifdef _WIN32
         CoUninitialize();
 #endif
@@ -444,7 +445,7 @@ protected:
         gmpi::drawing::Bitmap refBitmap;
         {
             const auto pathStr = refPath.string();
-            dxFactory->loadImageU(pathStr.c_str(), AccessPtr::put(refBitmap));
+            drawingFactory->loadImageU(pathStr.c_str(), AccessPtr::put(refBitmap));
         }
 
         if (!refBitmap)
@@ -943,7 +944,7 @@ TEST_F(DrawingTest, DrawBitmapNative)
 {
     // Build a 16x16 four-quadrant pattern.
     gmpi::drawing::BitmapRenderTarget patRT;
-    dxFactory->createCpuRenderTarget({16, 16}, kRenderFlags, AccessPtr::put(patRT));
+    drawingFactory->createCpuRenderTarget({16, 16}, kRenderFlags, AccessPtr::put(patRT));
     patRT.beginDraw();
     auto redBrush    = patRT.createSolidColorBrush(Colors::Red);
     auto greenBrush  = patRT.createSolidColorBrush(Colors::Green);
@@ -966,7 +967,7 @@ TEST_F(DrawingTest, DrawBitmapNative)
 TEST_F(DrawingTest, DrawBitmapStretched)
 {
     gmpi::drawing::BitmapRenderTarget patRT;
-    dxFactory->createCpuRenderTarget({16, 16}, kRenderFlags, AccessPtr::put(patRT));
+    drawingFactory->createCpuRenderTarget({16, 16}, kRenderFlags, AccessPtr::put(patRT));
     patRT.beginDraw();
     auto redBrush    = patRT.createSolidColorBrush(Colors::Red);
     auto greenBrush  = patRT.createSolidColorBrush(Colors::Green);
@@ -989,7 +990,7 @@ TEST_F(DrawingTest, DrawBitmapStretched)
 TEST_F(DrawingTest, DrawBitmapLinearInterp)
 {
     gmpi::drawing::BitmapRenderTarget patRT;
-    dxFactory->createCpuRenderTarget({16, 16}, kRenderFlags, AccessPtr::put(patRT));
+    drawingFactory->createCpuRenderTarget({16, 16}, kRenderFlags, AccessPtr::put(patRT));
     patRT.beginDraw();
     auto redBrush    = patRT.createSolidColorBrush(Colors::Red);
     auto greenBrush  = patRT.createSolidColorBrush(Colors::Green);
@@ -1011,7 +1012,7 @@ TEST_F(DrawingTest, DrawBitmapLinearInterp)
 TEST_F(DrawingTest, DrawBitmapCropped)
 {
     gmpi::drawing::BitmapRenderTarget patRT;
-    dxFactory->createCpuRenderTarget({16, 16}, kRenderFlags, AccessPtr::put(patRT));
+    drawingFactory->createCpuRenderTarget({16, 16}, kRenderFlags, AccessPtr::put(patRT));
     patRT.beginDraw();
     auto redBrush    = patRT.createSolidColorBrush(Colors::Red);
     auto greenBrush  = patRT.createSolidColorBrush(Colors::Green);
@@ -1034,7 +1035,7 @@ TEST_F(DrawingTest, DrawBitmapCropped)
 TEST_F(DrawingTest, DrawBitmapOpacity)
 {
     gmpi::drawing::BitmapRenderTarget patRT;
-    dxFactory->createCpuRenderTarget({16, 16}, kRenderFlags, AccessPtr::put(patRT));
+    drawingFactory->createCpuRenderTarget({16, 16}, kRenderFlags, AccessPtr::put(patRT));
     patRT.beginDraw();
     auto redBrush    = patRT.createSolidColorBrush(Colors::Red);
     auto greenBrush  = patRT.createSolidColorBrush(Colors::Green);
@@ -1552,7 +1553,7 @@ TEST_F(DrawingTest, FontMetricsVisual)
 
     // Create a dedicated render target for this test.
     gmpi::drawing::BitmapRenderTarget bigRT;
-    dxFactory->createCpuRenderTarget({kW, kH}, kRenderFlags, AccessPtr::put(bigRT));
+    drawingFactory->createCpuRenderTarget({kW, kH}, kRenderFlags, AccessPtr::put(bigRT));
     bigRT.beginDraw();
     bigRT.clear(Colors::White);
 
@@ -1561,7 +1562,7 @@ TEST_F(DrawingTest, FontMetricsVisual)
     constexpr float kBaselineY  = 86.f;   // y we want the text baseline to land on
 
     TextFormat tf;
-    dxFactory->createTextFormat(
+    drawingFactory->createTextFormat(
         "Arial", FontWeight::Regular, FontStyle::Normal, FontStretch::Normal,
         kFontHeight, static_cast<int32_t>(FontFlags::BodyHeight), AccessPtr::put(tf));
     tf.setWordWrapping(WordWrapping::NoWrap);
@@ -1607,7 +1608,7 @@ TEST_F(DrawingTest, FontMetricsVisual)
 
     // ---- labels (small Arial, right-aligned, matching line colour) ----
     TextFormat labelTF;
-    dxFactory->createTextFormat(
+    drawingFactory->createTextFormat(
         "Arial", FontWeight::Regular, FontStyle::Normal, FontStretch::Normal,
         9.f, static_cast<int32_t>(FontFlags::BodyHeight), AccessPtr::put(labelTF));
     labelTF.setTextAlignment(TextAlignment::Trailing);
@@ -1648,12 +1649,12 @@ TEST_F(DrawingTest, ColourRoundTrip)
 
     // Load the gradient PNG as a bitmap.
     gmpi::drawing::Bitmap srcBmp;
-    dxFactory->loadImageU(gradPath.string().c_str(), AccessPtr::put(srcBmp));
+    drawingFactory->loadImageU(gradPath.string().c_str(), AccessPtr::put(srcBmp));
     ASSERT_TRUE(srcBmp) << "Failed to load gradient PNG: " << gradPath.string();
 
     // Render into a dedicated 128x20 render target, drawing the bitmap 1:1.
     gmpi::drawing::BitmapRenderTarget rt;
-    dxFactory->createCpuRenderTarget({128, 20}, kRenderFlags, AccessPtr::put(rt));
+    drawingFactory->createCpuRenderTarget({128, 20}, kRenderFlags, AccessPtr::put(rt));
     rt.beginDraw();
     rt.drawBitmap(srcBmp, {0.f, 0.f, 128.f, 20.f}, {0.f, 0.f, 128.f, 20.f},
                   1.0f, BitmapInterpolationMode::NearestNeighbor);
@@ -1661,4 +1662,184 @@ TEST_F(DrawingTest, ColourRoundTrip)
 
     // The gradient PNG is the reference — the round-trip output must match it.
     EXPECT_TRUE(checkBitmap("colourRoundTrip", rt));
+}
+
+// ============================================================
+// Blur / shadow tests (CachedBlur)
+// ============================================================
+
+// Black text on white with a soft drop shadow behind it.
+TEST_F(DrawingTest, BlurTextShadow)
+{
+    constexpr uint32_t kW = 128, kH = 64;
+    auto factory = g.getFactory();
+    auto bigRT = factory.createCpuRenderTarget({kW, kH}, kRenderFlags);
+    bigRT.beginDraw();
+    bigRT.clear(Colors::White);
+    Graphics gRT(AccessPtr::get(bigRT)); // cachedBlur::draw requires Graphics&
+
+    auto tf = makeTextFormat(20.f);
+
+    const Rect textRect{10.f, 14.f, 120.f, 50.f};
+    constexpr float shadowOffX = 2.f, shadowOffY = 2.f;
+    const Rect bounds{0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH)};
+
+    // Draw shadow: blurred dark text offset down-right.
+    cachedBlur shadow;
+    shadow.tint = Color{0.f, 0.f, 0.f, 1.f}; // black
+    shadow.draw(gRT, bounds, [&](Graphics& mask) {
+        auto brush = mask.createSolidColorBrush(Colors::White);
+        mask.drawTextU("Shadow", tf,
+            {textRect.left + shadowOffX, textRect.top + shadowOffY,
+             textRect.right + shadowOffX, textRect.bottom + shadowOffY}, brush);
+    });
+
+    // Draw crisp text on top.
+    auto textBrush = bigRT.createSolidColorBrush(Colors::Black);
+    bigRT.drawTextU("Shadow", tf, textRect, textBrush);
+
+    bigRT.endDraw();
+    EXPECT_TRUE(checkBitmap("blurTextShadow", bigRT, 2));
+}
+
+// Lime text on black with a glowing halo.
+TEST_F(DrawingTest, BlurTextGlow)
+{
+    constexpr uint32_t kW = 128, kH = 64;
+    auto factory = g.getFactory();
+    auto bigRT = factory.createCpuRenderTarget({kW, kH}, kRenderFlags);
+    bigRT.beginDraw();
+    bigRT.clear(Colors::Black);
+    Graphics gRT(AccessPtr::get(bigRT));
+
+    auto tf = makeTextFormat(20.f);
+
+    const Rect textRect{10.f, 14.f, 120.f, 50.f};
+    const Rect bounds{0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH)};
+
+    // Draw glow: blurred lime around the text (no offset).
+    cachedBlur glow;
+    glow.tint = Colors::Lime;
+    glow.draw(gRT, bounds, [&](Graphics& mask) {
+        auto brush = mask.createSolidColorBrush(Colors::White);
+        mask.drawTextU("Glow", tf, textRect, brush);
+    });
+
+    // Draw crisp text on top.
+    auto textBrush = bigRT.createSolidColorBrush(Colors::Lime);
+    bigRT.drawTextU("Glow", tf, textRect, textBrush);
+
+    bigRT.endDraw();
+    EXPECT_TRUE(checkBitmap("blurTextGlow", bigRT, 2));
+}
+
+// Neumorphic "bump" — raised rounded rectangle with light and dark shadows.
+TEST_F(DrawingTest, BlurNeumorphicBump)
+{
+    constexpr uint32_t kW = 128, kH = 128;
+    auto factory = g.getFactory();
+    auto bigRT = factory.createCpuRenderTarget({kW, kH}, kRenderFlags);
+    bigRT.beginDraw();
+    Graphics gRT(AccessPtr::get(bigRT));
+
+    const Color bgColor = colorFromHex(0xE0E0E0u);
+    bigRT.clear(bgColor);
+
+    const RoundedRect shape{{24.f, 24.f, 104.f, 104.f}, 16.f, 16.f};
+    const Rect bounds{0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH)};
+    constexpr float offset = 4.f;
+
+    // Dark shadow (bottom-right): draw shape shifted up-left so blur spills down-right.
+    cachedBlur darkShadow;
+    darkShadow.tint = Color{0.f, 0.f, 0.f, 0.5f}; // semi-transparent black
+    darkShadow.draw(gRT, bounds, [&](Graphics& mask) {
+        auto brush = mask.createSolidColorBrush(Colors::White);
+        RoundedRect shifted = shape;
+        shifted.rect.left  -= offset;
+        shifted.rect.top   -= offset;
+        shifted.rect.right -= offset;
+        shifted.rect.bottom-= offset;
+        mask.fillRoundedRectangle(shifted, brush);
+    });
+
+    // Light shadow (top-left): draw shape shifted down-right so blur spills up-left.
+    cachedBlur lightShadow;
+    lightShadow.tint = Color{1.f, 1.f, 1.f, 0.7f}; // semi-transparent white
+    lightShadow.draw(gRT, bounds, [&](Graphics& mask) {
+        auto brush = mask.createSolidColorBrush(Colors::White);
+        RoundedRect shifted = shape;
+        shifted.rect.left  += offset;
+        shifted.rect.top   += offset;
+        shifted.rect.right += offset;
+        shifted.rect.bottom+= offset;
+        mask.fillRoundedRectangle(shifted, brush);
+    });
+
+    // Draw the actual raised surface on top.
+    auto surfaceBrush = bigRT.createSolidColorBrush(bgColor);
+    bigRT.fillRoundedRectangle(shape, surfaceBrush);
+
+    bigRT.endDraw();
+    EXPECT_TRUE(checkBitmap("blurNeumorphicBump", bigRT, 2));
+}
+
+// Neumorphic "dip" — recessed rounded rectangle with inner shadows.
+// Achieved by drawing shadow shapes that overlap the interior edges,
+// then clipping to the rounded-rect region so shadows appear only inside.
+TEST_F(DrawingTest, BlurNeumorphicDip)
+{
+    constexpr uint32_t kW = 128, kH = 128;
+    auto factory = g.getFactory();
+    auto bigRT = factory.createCpuRenderTarget({kW, kH}, kRenderFlags);
+    bigRT.beginDraw();
+    {
+        Graphics gRT(AccessPtr::get(bigRT));
+
+        const Color bgColor = colorFromHex(0xE0E0E0u);
+        bigRT.clear(bgColor);
+
+        const RoundedRect shape{ {24.f, 24.f, 104.f, 104.f}, 16.f, 16.f };
+        const Rect bounds{ 0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH) };
+        constexpr float offset = 4.f;
+
+
+        // step one a rounded rect hole geometry for the inner shadows: a large rectangle with a rounded-rect hole.
+        auto makeHoleGeometry = [&](float dx, float dy) {
+            auto geom = gRT.getFactory().createPathGeometry();
+            auto sink = geom.open();
+            sink.setFillMode(FillMode::Alternate);
+            sink.addRect({ 0, 0, static_cast<float>(kW), static_cast<float>(kH) }, FigureBegin::Filled);
+            sink.addRoundedRect({ {shape.rect.left + dx, shape.rect.top + dy,
+                                  shape.rect.right + dx, shape.rect.bottom + dy},
+                                 shape.radiusX, shape.radiusY });
+            sink.close();
+            return geom;
+        };
+
+        // draw the shadow.
+        auto darkGeom = makeHoleGeometry(offset, offset);
+        cachedBlur innerDark;
+        innerDark.tint = Color{ 0.f, 0.f, 0.f, 0.5f };
+        innerDark.draw(gRT, bounds, [&](Graphics& mask) {
+            auto brush = mask.createSolidColorBrush(Colors::White);
+            mask.fillGeometry(darkGeom, brush);
+            });
+
+        // draw the highlight.
+        // Light inner highlight (bottom & right): hole shifted up-left.
+        auto lightGeom = makeHoleGeometry(-offset, -offset);
+        cachedBlur innerLight;
+        innerLight.tint = Color{ 1.f, 1.f, 1.f, 0.8f };
+        innerLight.draw(gRT, bounds, [&](Graphics& mask) {
+            auto brush = mask.createSolidColorBrush(Colors::White);
+            mask.fillGeometry(lightGeom, brush);
+            });
+
+        // mask off everything outside the dip;
+        auto maskGeom = makeHoleGeometry(0, 0);
+		gRT.fillGeometry(maskGeom, gRT.createSolidColorBrush(bgColor));
+    }
+    bigRT.endDraw();
+
+    EXPECT_TRUE(checkBitmap("blurNeumorphicDip", bigRT, 2));
 }
