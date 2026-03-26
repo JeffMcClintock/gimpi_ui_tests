@@ -53,7 +53,6 @@ using namespace gmpi::drawing::Colors;
 // The bitmap must have been created with the SRGBPixels flag so its
 // locked pixels are 32bpp (PBGRA on Windows, RGBA on macOS).
 
-#ifdef _WIN32
 // Linear float [0,1] → sRGB uint8_t [0,255].
 static uint8_t linearToSRGB_f(float c)
 {
@@ -64,6 +63,7 @@ static uint8_t linearToSRGB_f(float c)
     return static_cast<uint8_t>(std::clamp(s * 255.0f + 0.5f, 0.0f, 255.0f));
 }
 
+#ifdef _WIN32
 // Linear uint8_t [0,255] → sRGB uint8_t [0,255].
 static uint8_t linearToSRGB(uint8_t v)
 {
@@ -315,10 +315,47 @@ static bool savePng(const std::filesystem::path& path, gmpi::drawing::Bitmap& bi
     uint8_t* data    = pixels.getAddress();
     int32_t  bpr     = pixels.getBytesPerRow();
     SizeU    size    = bitmap.getSize();
+    int32_t  bpp     = bpr / static_cast<int32_t>(size.width);
+
+    // If float-linear (128bpp), convert to 8-bit sRGB RGBA for PNG output.
+    std::vector<uint8_t> srgbBuf;
+    int32_t srgbBpr = bpr;
+    uint8_t* pngData = data;
+
+    if (bpp == 16)
+    {
+        srgbBpr = static_cast<int32_t>(size.width) * 4;
+        srgbBuf.resize(srgbBpr * size.height);
+        for (uint32_t y = 0; y < size.height; ++y)
+        {
+            for (uint32_t x = 0; x < size.width; ++x)
+            {
+                const float* f = reinterpret_cast<const float*>(data + y * bpr + x * 16);
+                float fr = f[0], fg = f[1], fb = f[2], fa = f[3];
+                uint8_t a = static_cast<uint8_t>(std::clamp(fa * 255.0f + 0.5f, 0.0f, 255.0f));
+                if (fa > 0.0f)
+                {
+                    fr = std::clamp(fr / fa, 0.0f, 1.0f);
+                    fg = std::clamp(fg / fa, 0.0f, 1.0f);
+                    fb = std::clamp(fb / fa, 0.0f, 1.0f);
+                }
+                else { fr = fg = fb = 0.0f; }
+
+                uint8_t* dst = srgbBuf.data() + y * srgbBpr + x * 4;
+                // Re-premultiply in sRGB for PNG.
+                float aNorm = a / 255.0f;
+                dst[0] = static_cast<uint8_t>(linearToSRGB_f(fr) * aNorm + 0.5f);
+                dst[1] = static_cast<uint8_t>(linearToSRGB_f(fg) * aNorm + 0.5f);
+                dst[2] = static_cast<uint8_t>(linearToSRGB_f(fb) * aNorm + 0.5f);
+                dst[3] = a;
+            }
+        }
+        pngData = srgbBuf.data();
+    }
 
     CGColorSpaceRef colorSpace = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
     CGContextRef ctx = CGBitmapContextCreate(
-        data, size.width, size.height, 8, bpr,
+        pngData, size.width, size.height, 8, srgbBpr,
         colorSpace,
         kCGImageAlphaPremultipliedLast); // RGBA premultiplied
     CGColorSpaceRelease(colorSpace);
@@ -557,10 +594,37 @@ protected:
                     }
                 }
 #else
-                // macOS: lockPixels returns sRGB RGBA directly.
-                const uint8_t* p = ourAddr + y * ourBpr + x * 4;
-                rendered[0] = p[0]; rendered[1] = p[1];
-                rendered[2] = p[2]; rendered[3] = p[3];
+                if (ourBpp == 16)
+                {
+                    // 128bpp float: premultiplied RGBA 32-bit float, linear sRGB.
+                    const float* f = reinterpret_cast<const float*>(
+                        ourAddr + y * ourBpr + x * 16);
+                    float fr = f[0];
+                    float fg = f[1];
+                    float fb = f[2];
+                    float fa = f[3];
+
+                    uint8_t a = static_cast<uint8_t>(std::clamp(fa * 255.0f + 0.5f, 0.0f, 255.0f));
+                    if (fa > 0.0f)
+                    {
+                        fr = std::clamp(fr / fa, 0.0f, 1.0f);
+                        fg = std::clamp(fg / fa, 0.0f, 1.0f);
+                        fb = std::clamp(fb / fa, 0.0f, 1.0f);
+                    }
+                    else { fr = fg = fb = 0.0f; }
+
+                    rendered[0] = linearToSRGB_f(fr); // R
+                    rendered[1] = linearToSRGB_f(fg); // G
+                    rendered[2] = linearToSRGB_f(fb); // B
+                    rendered[3] = a;
+                }
+                else
+                {
+                    // 32bpp: sRGB RGBA directly (SRGBPixels or loaded PNG).
+                    const uint8_t* p = ourAddr + y * ourBpr + x * 4;
+                    rendered[0] = p[0]; rendered[1] = p[1];
+                    rendered[2] = p[2]; rendered[3] = p[3];
+                }
 #endif
                 // Reference: sRGB BGRA from loaded PNG (always 32bppPBGRA).
                 const uint8_t* ref = refAddr + y * refBpr + x * 4;
