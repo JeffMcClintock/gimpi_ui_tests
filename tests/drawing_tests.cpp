@@ -357,12 +357,6 @@ protected:
     // giving accurate colour round-trips with no 8-bit linear quantisation.
     static constexpr int32_t kRenderFlags = 0;
 
-//#ifdef _WIN32
-//    std::unique_ptr<gmpi::directx::Factory> drawingFactory;
-//#endif
-//#ifdef __APPLE__
-//    std::unique_ptr<gmpi::cocoa::Factory> drawingFactory;
-//#endif
     gmpi::drawing::Factory drawingFactory;
     gmpi::drawing::BitmapRenderTarget g;
     bool drawingActive = false;
@@ -382,9 +376,6 @@ protected:
 #ifdef __APPLE__
         *native_ptr = new gmpi::cocoa::Factory();
 #endif
-        //auto native_ptr = (gmpi::drawing::api::IBitmapRenderTarget**)AccessPtr::put(g);
-        //drawingFactory->createCpuRenderTarget({kWidth, kHeight}, kRenderFlags, native_ptr);
-
         g = drawingFactory.createCpuRenderTarget({ kWidth, kHeight }, kRenderFlags);
 
         g.beginDraw();
@@ -399,7 +390,7 @@ protected:
         return g.getFactory().createStrokeStyle(props, dashes);
     }
 
-    // Create a TextFormat via the low-level factory.
+    // Create a TextFormat via the wrapper factory.
     // Defaults to Arial so results are consistent across Windows machines.
     TextFormat makeTextFormat(
         float height,
@@ -408,12 +399,8 @@ protected:
         FontStyle          style   = FontStyle::Normal,
         FontStretch        stretch = FontStretch::Normal)
     {
-        TextFormat tf;
-        drawingFactory->createTextFormat(
-            family, weight, style, stretch, height,
-            static_cast<int32_t>(FontFlags::BodyHeight),
-            AccessPtr::put(tf));
-        return tf;
+        std::string_view familySv{family};
+        return drawingFactory.createTextFormat(height, {&familySv, 1}, weight, style, stretch);
     }
 
     // Build an 8x8 checkerboard bitmap using a small render target, then
@@ -422,11 +409,7 @@ protected:
                                       Color color2 = Colors::White)
     {
         constexpr uint32_t kPat = 8;
-        gmpi::drawing::BitmapRenderTarget patRT;
-        auto native_ptr = (gmpi::drawing::api::IBitmapRenderTarget**)AccessPtr::put(patRT);
-        drawingFactory->createCpuRenderTarget({kPat, kPat}, kRenderFlags, native_ptr);
-
-        auto patRT = 
+        auto patRT = drawingFactory.createCpuRenderTarget({kPat, kPat}, kRenderFlags);
 
         patRT.beginDraw();
         patRT.clear(color1);
@@ -445,7 +428,7 @@ protected:
             g.endDraw();
         // Release rt before factory to avoid dangling pointer.
         g = gmpi::drawing::BitmapRenderTarget{};
-        drawingFactory.reset();
+        drawingFactory = {};
 #ifdef _WIN32
         CoUninitialize();
 #endif
@@ -471,11 +454,7 @@ protected:
         std::filesystem::remove(logPath);
 
         // Try to load the reference image.
-        gmpi::drawing::Bitmap refBitmap;
-        {
-            const auto pathStr = refPath.string();
-            drawingFactory->loadImageU(pathStr.c_str(), AccessPtr::put(refBitmap));
-        }
+        auto refBitmap = drawingFactory.loadImageU(refPath.string());
 
         if (!refBitmap)
         {
@@ -972,8 +951,7 @@ TEST_F(DrawingTest, AlphaEquivalentGrey)
 TEST_F(DrawingTest, DrawBitmapNative)
 {
     // Build a 16x16 four-quadrant pattern.
-    gmpi::drawing::BitmapRenderTarget patRT;
-    drawingFactory->createCpuRenderTarget({16, 16}, kRenderFlags, AccessPtr::put(patRT));
+    auto patRT = drawingFactory.createCpuRenderTarget({ 16, 16 }, kRenderFlags);
     patRT.beginDraw();
     auto redBrush    = patRT.createSolidColorBrush(Colors::Red);
     auto greenBrush  = patRT.createSolidColorBrush(Colors::Green);
@@ -995,8 +973,7 @@ TEST_F(DrawingTest, DrawBitmapNative)
 // Stretch the same 16x16 bitmap to fill most of the render target.
 TEST_F(DrawingTest, DrawBitmapStretched)
 {
-    gmpi::drawing::BitmapRenderTarget patRT;
-    drawingFactory->createCpuRenderTarget({16, 16}, kRenderFlags, AccessPtr::put(patRT));
+    auto patRT = drawingFactory.createCpuRenderTarget({16, 16}, kRenderFlags);
     patRT.beginDraw();
     auto redBrush    = patRT.createSolidColorBrush(Colors::Red);
     auto greenBrush  = patRT.createSolidColorBrush(Colors::Green);
@@ -1018,8 +995,7 @@ TEST_F(DrawingTest, DrawBitmapStretched)
 // Stretch with bilinear interpolation — smooth edges between quadrants.
 TEST_F(DrawingTest, DrawBitmapLinearInterp)
 {
-    gmpi::drawing::BitmapRenderTarget patRT;
-    drawingFactory->createCpuRenderTarget({16, 16}, kRenderFlags, AccessPtr::put(patRT));
+    auto patRT = drawingFactory.createCpuRenderTarget({16, 16}, kRenderFlags);
     patRT.beginDraw();
     auto redBrush    = patRT.createSolidColorBrush(Colors::Red);
     auto greenBrush  = patRT.createSolidColorBrush(Colors::Green);
@@ -1040,8 +1016,7 @@ TEST_F(DrawingTest, DrawBitmapLinearInterp)
 // Draw only a sub-rectangle (top-right quadrant) of the source bitmap.
 TEST_F(DrawingTest, DrawBitmapCropped)
 {
-    gmpi::drawing::BitmapRenderTarget patRT;
-    drawingFactory->createCpuRenderTarget({16, 16}, kRenderFlags, AccessPtr::put(patRT));
+    auto patRT = drawingFactory.createCpuRenderTarget({16, 16}, kRenderFlags);
     patRT.beginDraw();
     auto redBrush    = patRT.createSolidColorBrush(Colors::Red);
     auto greenBrush  = patRT.createSolidColorBrush(Colors::Green);
@@ -1063,8 +1038,7 @@ TEST_F(DrawingTest, DrawBitmapCropped)
 // Draw a bitmap at 50% opacity over a coloured background.
 TEST_F(DrawingTest, DrawBitmapOpacity)
 {
-    gmpi::drawing::BitmapRenderTarget patRT;
-    drawingFactory->createCpuRenderTarget({16, 16}, kRenderFlags, AccessPtr::put(patRT));
+    auto patRT = drawingFactory.createCpuRenderTarget({16, 16}, kRenderFlags);
     patRT.beginDraw();
     auto redBrush    = patRT.createSolidColorBrush(Colors::Red);
     auto greenBrush  = patRT.createSolidColorBrush(Colors::Green);
@@ -1581,8 +1555,7 @@ TEST_F(DrawingTest, FontMetricsVisual)
     constexpr uint32_t kW = 256, kH = 120;
 
     // Create a dedicated render target for this test.
-    gmpi::drawing::BitmapRenderTarget bigRT;
-    drawingFactory->createCpuRenderTarget({kW, kH}, kRenderFlags, AccessPtr::put(bigRT));
+    auto bigRT = drawingFactory.createCpuRenderTarget({kW, kH}, kRenderFlags);
     bigRT.beginDraw();
     bigRT.clear(Colors::White);
 
@@ -1590,10 +1563,7 @@ TEST_F(DrawingTest, FontMetricsVisual)
     constexpr float kFontHeight = 60.f;   // body height (ascent + descent)
     constexpr float kBaselineY  = 86.f;   // y we want the text baseline to land on
 
-    TextFormat tf;
-    drawingFactory->createTextFormat(
-        "Arial", FontWeight::Regular, FontStyle::Normal, FontStretch::Normal,
-        kFontHeight, static_cast<int32_t>(FontFlags::BodyHeight), AccessPtr::put(tf));
+    auto tf = makeTextFormat(kFontHeight);
     tf.setWordWrapping(WordWrapping::NoWrap);
 
     FontMetrics fm = tf.getFontMetrics();
@@ -1636,10 +1606,7 @@ TEST_F(DrawingTest, FontMetricsVisual)
     bigRT.drawTextU("Hfgx", tf, layoutRect, textBrush);
 
     // ---- labels (small Arial, right-aligned, matching line colour) ----
-    TextFormat labelTF;
-    drawingFactory->createTextFormat(
-        "Arial", FontWeight::Regular, FontStyle::Normal, FontStretch::Normal,
-        9.f, static_cast<int32_t>(FontFlags::BodyHeight), AccessPtr::put(labelTF));
+    auto labelTF = makeTextFormat(9.f);
     labelTF.setTextAlignment(TextAlignment::Trailing);
     FontMetrics labelFm = labelTF.getFontMetrics();
     const float labelW = 80.f;
@@ -1677,13 +1644,11 @@ TEST_F(DrawingTest, ColourRoundTrip)
 #endif
 
     // Load the gradient PNG as a bitmap.
-    gmpi::drawing::Bitmap srcBmp;
-    drawingFactory->loadImageU(gradPath.string().c_str(), AccessPtr::put(srcBmp));
+    auto srcBmp = drawingFactory.loadImageU(gradPath.string());
     ASSERT_TRUE(srcBmp) << "Failed to load gradient PNG: " << gradPath.string();
 
     // Render into a dedicated 128x20 render target, drawing the bitmap 1:1.
-    gmpi::drawing::BitmapRenderTarget rt;
-    drawingFactory->createCpuRenderTarget({128, 20}, kRenderFlags, AccessPtr::put(rt));
+    auto rt = drawingFactory.createCpuRenderTarget({128, 20}, kRenderFlags);
     rt.beginDraw();
     rt.drawBitmap(srcBmp, {0.f, 0.f, 128.f, 20.f}, {0.f, 0.f, 128.f, 20.f},
                   1.0f, BitmapInterpolationMode::NearestNeighbor);
@@ -1819,27 +1784,25 @@ TEST_F(DrawingTest, BlurNeumorphicBump)
     auto g_output = factory.createCpuRenderTarget({ kW, kH }, kRenderFlags);
     g_output.beginDraw();
     {
-        Graphics g(AccessPtr::get(g_output));
-
         //  Cream and light-blue checkerboard tiles to expose alpha blending.
         {
             const Color bgCream = colorFromHex(0xF6E7D7u);
             const Color bgBlue = colorFromHex(0xD9EAF8u);
             const float tile = 16.f;
 
-            g.clear(bgCream);
-            auto checkerBrush = g.createSolidColorBrush(bgBlue);
+            g_output.clear(bgCream);
+            auto checkerBrush = g_output.createSolidColorBrush(bgBlue);
             for(float y = 0.f; y < static_cast<float>(kH); y += tile)
             {
                 for(float x = ((static_cast<int>(y / tile)) & 1) ? tile : 0.f; x < static_cast<float>(kW); x += tile * 2.f)
                 {
-                    g.fillRectangle({ x, y, x + tile, y + tile }, checkerBrush);
+                    g_output.fillRectangle({ x, y, x + tile, y + tile }, checkerBrush);
                 }
             }
         }
 
         // draw the blurs over the top.
-        g.drawBitmap(
+        g_output.drawBitmap(
               image
             , {0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH)}
             , {0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH)}
@@ -2007,9 +1970,8 @@ TEST_F(DrawingTest, BlurNeumorphicDip)
         maskRT.beginDraw();
         maskRT.clear(Color{0.f, 0.f, 0.f, 0.f});
         {
-            Graphics gMask(AccessPtr::get(maskRT));
-            auto whiteBrush = gMask.createSolidColorBrush(Colors::White);
-            gMask.fillRoundedRectangle(shape, whiteBrush);
+            auto whiteBrush = maskRT.createSolidColorBrush(Colors::White);
+            maskRT.fillRoundedRectangle(shape, whiteBrush);
         }
         maskRT.endDraw();
 
@@ -2023,7 +1985,7 @@ TEST_F(DrawingTest, BlurNeumorphicDip)
         // --- 4. Composite the masked shadow overlay onto bigRT ---
         {
             auto shadowBmp = shadowRT.getBitmap();
-            gRT.drawBitmap(shadowBmp, bounds, bounds);
+            bigRT.drawBitmap(shadowBmp, bounds, bounds);
         }
     }
     bigRT.endDraw();
@@ -2187,9 +2149,8 @@ TEST_F(DrawingTest, BlurNeumorphicDipCheckerboard)
     maskRT.beginDraw();
     maskRT.clear(Color{0.f, 0.f, 0.f, 0.f});
     {
-        Graphics gMask(AccessPtr::get(maskRT));
-        auto whiteBrush = gMask.createSolidColorBrush(Colors::White);
-        gMask.fillRoundedRectangle(shape, whiteBrush);
+        auto whiteBrush = maskRT.createSolidColorBrush(Colors::White);
+        maskRT.fillRoundedRectangle(shape, whiteBrush);
     }
     maskRT.endDraw();
 
@@ -2212,9 +2173,8 @@ TEST_F(DrawingTest, BlurNeumorphicDipCheckerboard)
             for (float cx = ((static_cast<int>(cy / tile)) & 1) ? tile : 0.f; cx < static_cast<float>(kW); cx += tile * 2.f)
                 bigRT.fillRectangle({cx, cy, cx + tile, cy + tile}, checkerBrush);
 
-        Graphics gRT(AccessPtr::get(bigRT));
         auto finalBmp = shadowRT.getBitmap();
-        gRT.drawBitmap(finalBmp, bounds, bounds);
+        bigRT.drawBitmap(finalBmp, bounds, bounds);
     }
     bigRT.endDraw();
 
@@ -2274,19 +2234,17 @@ TEST_F(DrawingTest, BlurNeumorphicBumpCheckerboard)
     maskRT.beginDraw();
     maskRT.clear(Color{0.f, 0.f, 0.f, 0.f}); // transparent everywhere
     {
-        Graphics gMask(AccessPtr::get(maskRT));
-        auto geom = gMask.getFactory().createPathGeometry();
+        auto geom = maskRT.getFactory().createPathGeometry();
         auto sink = geom.open();
         sink.setFillMode(FillMode::Alternate);
         sink.addRect({0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH)}, FigureBegin::Filled);
         sink.addRoundedRect(shape);
         sink.close();
-        auto whiteBrush = gMask.createSolidColorBrush(Colors::White);
-        gMask.fillGeometry(geom, whiteBrush);
+        auto whiteBrush = maskRT.createSolidColorBrush(Colors::White);
+        maskRT.fillGeometry(geom, whiteBrush);
     }
     maskRT.endDraw();
 
-    // --- 3. Apply mask to shadow image pixel-by-pixel ---
     // --- 3. Apply mask to shadow image.
     auto shadowBmp = shadowRT.getBitmap();
     auto maskBmp   = maskRT.getBitmap();
@@ -2306,9 +2264,8 @@ TEST_F(DrawingTest, BlurNeumorphicBumpCheckerboard)
             for (float cx = ((static_cast<int>(cy / tile)) & 1) ? tile : 0.f; cx < static_cast<float>(kW); cx += tile * 2.f)
                 bigRT.fillRectangle({cx, cy, cx + tile, cy + tile}, checkerBrush);
 
-        Graphics gRT(AccessPtr::get(bigRT));
         auto finalBmp = shadowRT.getBitmap();
-        gRT.drawBitmap(finalBmp, bounds, bounds);
+        bigRT.drawBitmap(finalBmp, bounds, bounds);
     }
     bigRT.endDraw();
 
