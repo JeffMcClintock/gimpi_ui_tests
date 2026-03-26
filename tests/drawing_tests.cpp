@@ -1751,55 +1751,144 @@ TEST_F(DrawingTest, BlurTextGlow)
     EXPECT_TRUE(checkBitmap("blurTextGlow", bigRT, 2));
 }
 
+#if 0
+
 // Neumorphic "bump" — raised rounded rectangle with light and dark shadows.
 TEST_F(DrawingTest, BlurNeumorphicBump)
 {
     constexpr uint32_t kW = 128, kH = 128;
+	const RoundedRect shape{ {24.f, 24.f, 104.f, 104.f}, 16.f, 16.f };
+
     auto factory = g.getFactory();
-    auto bigRT = factory.createCpuRenderTarget({kW, kH}, kRenderFlags);
-    bigRT.beginDraw();
-    Graphics gRT(AccessPtr::get(bigRT));
+	auto image_rt = factory.createCpuRenderTarget({ kW, kH }, (int)BitmapRenderTargetFlags::CpuReadable);
+	{
+        image_rt.beginDraw();
 
-    const Color bgColor = colorFromHex(0xE0E0E0u);
-    bigRT.clear(bgColor);
+        Graphics g_image(AccessPtr::get(image_rt));
 
-    const RoundedRect shape{{24.f, 24.f, 104.f, 104.f}, 16.f, 16.f};
-    const Rect bounds{0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH)};
-    constexpr float offset = 4.f;
+		const Rect bounds{ 0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH) };
+		constexpr float offset = 4.f;
 
-    // Dark shadow (bottom-right): draw shape shifted up-left so blur spills down-right.
-    cachedBlur darkShadow;
-    darkShadow.tint = Color{0.f, 0.f, 0.f, 0.5f}; // semi-transparent black
-    darkShadow.draw(gRT, bounds, [&](Graphics& mask) {
-        auto brush = mask.createSolidColorBrush(Colors::White);
-        RoundedRect shifted = shape;
-        shifted.rect.left  -= offset;
-        shifted.rect.top   -= offset;
-        shifted.rect.right -= offset;
-        shifted.rect.bottom-= offset;
-        mask.fillRoundedRectangle(shifted, brush);
-    });
+		// Dark shadow (bottom-right): draw shape shifted up-left so blur spills down-right.
+		cachedBlur darkShadow;
+		darkShadow.tint = Color{ 0.f, 0.f, 0.f, 0.5f }; // semi-transparent black
+		darkShadow.draw(g_image, bounds, [&](Graphics& mask) {
+			auto brush = mask.createSolidColorBrush(Colors::White);
+			RoundedRect shifted = shape;
+			shifted.rect = offsetRect(shifted.rect, Size{ -offset, -offset });
+			mask.fillRoundedRectangle(shifted, brush);
+			});
 
-    // Light shadow (top-left): draw shape shifted down-right so blur spills up-left.
-    cachedBlur lightShadow;
-    lightShadow.tint = Color{1.f, 1.f, 1.f, 0.7f}; // semi-transparent white
-    lightShadow.draw(gRT, bounds, [&](Graphics& mask) {
-        auto brush = mask.createSolidColorBrush(Colors::White);
-        RoundedRect shifted = shape;
-        shifted.rect.left  += offset;
-        shifted.rect.top   += offset;
-        shifted.rect.right += offset;
-        shifted.rect.bottom+= offset;
-        mask.fillRoundedRectangle(shifted, brush);
-    });
+		// Light shadow (top-left): draw shape shifted down-right so blur spills up-left.
+		cachedBlur lightShadow;
+		lightShadow.tint = Color{ 1.f, 1.f, 1.f, 0.7f }; // semi-transparent white
+		lightShadow.draw(g_image, bounds, [&](Graphics& mask) {
+			auto brush = mask.createSolidColorBrush(Colors::White);
+			RoundedRect shifted = shape;
+			shifted.rect = offsetRect(shifted.rect, Size{ offset, offset });
+			mask.fillRoundedRectangle(shifted, brush);
+			});
+	}
+
+    image_rt.endDraw();
+
+	auto alphaMask = factory.createCpuRenderTarget({ kW, kH }, (int)BitmapRenderTargetFlags::Mask | (int)BitmapRenderTargetFlags::CpuReadable);
+	{
+		alphaMask.beginDraw();
+		alphaMask.clear(Colors::Black); // solid
+		alphaMask.drawRoundedRectangle(shape, alphaMask.createSolidColorBrush(Colors::Black)); // where the hole is
+		alphaMask.endDraw();
+	}
+
+    auto mask = alphaMask.getBitmap();
+    auto image = image_rt.getBitmap();
+
+    {
+        auto maskPixels = mask.lockPixels(BitmapLockFlags::Read);
+        auto imagePixels = image.lockPixels(BitmapLockFlags::ReadWrite);
+        ASSERT_TRUE(maskPixels && imagePixels);
+
+        const auto maskSize = mask.getSize();
+        const auto imageSize = image.getSize();
+        ASSERT_EQ(maskSize.width, imageSize.width);
+        ASSERT_EQ(maskSize.height, imageSize.height);
+
+        const uint8_t* maskData = maskPixels.getAddress();
+        uint8_t* imageData = imagePixels.getAddress();
+        const int32_t maskBpr = maskPixels.getBytesPerRow();
+        const int32_t imageBpr = imagePixels.getBytesPerRow();
+        const int32_t imageBpp = imageBpr / static_cast<int32_t>(imageSize.width);
+
+        for(uint32_t y = 0; y < imageSize.height; ++y)
+        {
+            const uint8_t* maskRow = maskData + y * maskBpr;
+            uint8_t* imageRow = imageData + y * imageBpr;
+
+            for(uint32_t x = 0; x < imageSize.width; ++x)
+            {
+                const uint8_t maskAlpha = maskRow[x];
+                const float alpha = maskAlpha / 255.0f;
+
+                if(imageBpp == 8)
+                {
+                    auto* pixel = reinterpret_cast<uint16_t*>(imageRow + x * 8);
+                    pixel[0] = floatToHalf(halfToFloat(pixel[0]) * alpha);
+                    pixel[1] = floatToHalf(halfToFloat(pixel[1]) * alpha);
+                    pixel[2] = floatToHalf(halfToFloat(pixel[2]) * alpha);
+                    pixel[3] = floatToHalf(alpha);
+                }
+                else
+                {
+                    uint8_t* pixel = imageRow + x * 4;
+                    pixel[0] = static_cast<uint8_t>(pixel[0] * alpha + 0.5f);
+                    pixel[1] = static_cast<uint8_t>(pixel[1] * alpha + 0.5f);
+                    pixel[2] = static_cast<uint8_t>(pixel[2] * alpha + 0.5f);
+                    pixel[3] = maskAlpha;
+                }
+            }
+        }
+    }
+    
+    auto g_output = factory.createCpuRenderTarget({ kW, kH }, kRenderFlags);
+    g_output.beginDraw();
+    {
+        Graphics g(AccessPtr::get(g_output));
+
+        //  Cream and light-blue checkerboard tiles to expose alpha blending.
+        {
+            const Color bgCream = colorFromHex(0xF6E7D7u);
+            const Color bgBlue = colorFromHex(0xD9EAF8u);
+            const float tile = 16.f;
+
+            g.clear(bgCream);
+            auto checkerBrush = g.createSolidColorBrush(bgBlue);
+            for(float y = 0.f; y < static_cast<float>(kH); y += tile)
+            {
+                for(float x = ((static_cast<int>(y / tile)) & 1) ? tile : 0.f; x < static_cast<float>(kW); x += tile * 2.f)
+                {
+                    g.fillRectangle({ x, y, x + tile, y + tile }, checkerBrush);
+                }
+            }
+        }
+
+        // draw the blurs over the top.
+        g.drawBitmap(
+              image
+            , {0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH)}
+            , {0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH)}
+            , 1.0f
+            , BitmapInterpolationMode::NearestNeighbor);
+    }
+
+    g_output.endDraw();
 
     // Draw the actual raised surface on top.
-    auto surfaceBrush = bigRT.createSolidColorBrush(bgColor);
-    bigRT.fillRoundedRectangle(shape, surfaceBrush);
+//    auto surfaceBrush = bigRT.createSolidColorBrush(bgCream);
+//    bigRT.fillRoundedRectangle(shape, surfaceBrush);
 
-    bigRT.endDraw();
-    EXPECT_TRUE(checkBitmap("blurNeumorphicBump", bigRT, 2));
+    EXPECT_TRUE(checkBitmap("blurNeumorphicBump", g_output, 2));
 }
+#endif
 
 // Neumorphic "dip" — recessed rounded rectangle with inner shadows.
 // Shadows are rendered to an offscreen target, then a shape mask is applied
@@ -1875,6 +1964,25 @@ TEST_F(DrawingTest, BlurNeumorphicDip)
     auto factory = g.getFactory();
     auto bigRT = factory.createCpuRenderTarget({kW, kH}, kRenderFlags);
     bigRT.beginDraw();
+
+    // Cream background with light-blue checkerboard tiles to expose alpha blending.
+    {
+        const Color bgCream = colorFromHex(0xF6E7D7u);
+        const Color bgBlue = colorFromHex(0xD9EAF8u);
+        const float tile = 16.f;
+
+        bigRT.clear(bgCream);
+        auto checkerBrush = bigRT.createSolidColorBrush(bgBlue);
+        for(float y = 0.f; y < static_cast<float>(kH); y += tile)
+        {
+            for(float x = ((static_cast<int>(y / tile)) & 1) ? tile : 0.f; x < static_cast<float>(kW); x += tile * 2.f)
+            {
+                bigRT.fillRectangle({ x, y, x + tile, y + tile }, checkerBrush);
+            }
+        }
+    }
+
+
     {
         Graphics gRT(AccessPtr::get(bigRT));
 
@@ -1927,10 +2035,10 @@ TEST_F(DrawingTest, BlurNeumorphicDip)
         shadowRT.endDraw();
 
         // --- 2. Render shape mask: white inside rounded rect, black outside ---
-        // EightBitPixels so the mask bytes are simple uint8 BGRA.
+        // EightBitPixels → 8bpp alpha-only (1 byte per pixel).
         auto maskRT = factory.createCpuRenderTarget({kW, kH}, kEightBit);
         maskRT.beginDraw();
-        maskRT.clear(Colors::Black);
+        maskRT.clear(Color{0.f, 0.f, 0.f, 0.f});
         {
             Graphics gMask(AccessPtr::get(maskRT));
             auto whiteBrush = gMask.createSolidColorBrush(Colors::White);
@@ -1944,6 +2052,7 @@ TEST_F(DrawingTest, BlurNeumorphicDip)
         // At AA edges fractional mask values produce a smooth transition.
         // shadowRT may be 64bppPRGBAHalf (8 bpp, alpha at h[3] = bytes [6:7])
         // or 32bppPBGRA (4 bpp, alpha at byte [3]) depending on kRenderFlags.
+        // maskRT is 8bpp alpha-only (1 byte per pixel).
         {
             auto shadowBmp = shadowRT.getBitmap();
             auto maskBmp   = maskRT.getBitmap();
@@ -1961,8 +2070,8 @@ TEST_F(DrawingTest, BlurNeumorphicDip)
             {
                 for (uint32_t x = 0; x < kW; ++x)
                 {
-                    // Mask: blue channel [0] = 255 inside shape, 0 outside (BGRA).
-                    const float maskVal = maskData[y * maskBpr + x * 4] / 255.0f;
+                    // Mask is 8bpp alpha: 1 byte per pixel, 255 inside shape, 0 outside.
+                    const float maskVal = maskData[y * maskBpr + x] / 255.0f;
                     if (maskVal >= 1.0f) continue; // fully inside: nothing to do
 
                     uint8_t* sp = shadowData + y * shadowBpr + x * shadowBpp;
@@ -2001,3 +2110,381 @@ TEST_F(DrawingTest, BlurNeumorphicDip)
     EXPECT_TRUE(checkBitmap("blurNeumorphicDip", bigRT, 2));
 }
 #endif
+
+// Create an 8-bit (monochrome, single-plane) mask bitmap, draw a circle on it,
+// then verify pixel format and spot-check pixel values.
+TEST_F(DrawingTest, EightBitBitmapToOutput)
+{
+    constexpr int32_t kEightBit = (int32_t)BitmapRenderTargetFlags::EightBitPixels
+                                | (int32_t)BitmapRenderTargetFlags::CpuReadable;
+
+    auto factory = g.getFactory();
+
+    // Create an 8-bit offscreen render target and draw a filled circle.
+    auto offscreen = factory.createCpuRenderTarget({kWidth, kHeight}, kEightBit);
+    offscreen.beginDraw();
+    offscreen.clear(Color{0.f, 0.f, 0.f, 0.f});
+    auto brush = offscreen.createSolidColorBrush(Colors::White);
+    offscreen.fillEllipse(gmpi::drawing::Ellipse{{32.f, 32.f}, 24.f, 24.f}, brush);
+    offscreen.endDraw();
+
+    // Lock pixels and verify format.
+    auto bmp = offscreen.getBitmap();
+    auto pixels = bmp.lockPixels(BitmapLockFlags::Read);
+    ASSERT_TRUE(pixels);
+
+    const uint8_t* data = pixels.getAddress();
+    const int32_t  bpr  = pixels.getBytesPerRow();
+    const auto     size = bmp.getSize();
+
+    // Verify 8-bit monochrome: 1 byte per pixel.
+    EXPECT_EQ(bpr, static_cast<int32_t>(size.width))
+        << "Expected 1 byte per pixel (8-bit monochrome), got " << bpr << " bytes per row for " << size.width << " pixels wide";
+
+    // Centre of circle (32,32) — should be white (0xFF).
+    const uint8_t centre = data[32 * bpr + 32];
+    EXPECT_EQ(centre, 0xFF) << "Centre pixel should be white (0xFF)";
+
+    // Corner (0,0) — well outside the circle, should be black (0x00).
+    const uint8_t corner = data[0 * bpr + 0];
+    EXPECT_EQ(corner, 0x00) << "Corner pixel should be black (0x00)";
+
+    // Just inside the circle (32,9) — should be white.
+    const uint8_t inside = data[9 * bpr + 32];
+    EXPECT_EQ(inside, 0xFF) << "Pixel just inside circle should be white";
+
+    // Just outside the circle (32,7) — should be black.
+    const uint8_t outside = data[7 * bpr + 32];
+    EXPECT_EQ(outside, 0x00) << "Pixel just outside circle should be black";
+}
+
+// Create an 8-bit mono mask (circle) and a colour image (solid fill),
+// apply the mask to the image, then draw the result over a checkerboard.
+TEST_F(DrawingTest, EightBitMaskBitmapToOutput)
+{
+    constexpr int32_t kEightBit = (int32_t)BitmapRenderTargetFlags::EightBitPixels
+                                | (int32_t)BitmapRenderTargetFlags::CpuReadable;
+    constexpr int32_t kColorCpu = (int32_t)BitmapRenderTargetFlags::CpuReadable;
+
+    auto factory = g.getFactory();
+
+    // 1. Mono mask: circle (white=opaque) on transparent background.
+    auto maskRT = factory.createCpuRenderTarget({kWidth, kHeight}, kEightBit);
+    maskRT.beginDraw();
+    maskRT.clear(Color{0.f, 0.f, 0.f, 0.f});
+    auto maskBrush = maskRT.createSolidColorBrush(Colors::White);
+    maskRT.fillEllipse(gmpi::drawing::Ellipse{{32.f, 32.f}, 24.f, 24.f}, maskBrush);
+    maskRT.endDraw();
+
+    // 2. Colour image: solid DodgerBlue.
+    auto colorRT = factory.createCpuRenderTarget({kWidth, kHeight}, kColorCpu);
+    colorRT.beginDraw();
+    colorRT.clear(Colors::DodgerBlue);
+    colorRT.endDraw();
+
+    // 3. Apply mask to colour image: multiply all channels by mask alpha.
+    auto maskBmp  = maskRT.getBitmap();
+    auto colorBmp = colorRT.getBitmap();
+    {
+        auto maskPx  = maskBmp.lockPixels(BitmapLockFlags::Read);
+        auto colorPx = colorBmp.lockPixels(BitmapLockFlags::ReadWrite);
+
+        const uint8_t* maskData  = maskPx.getAddress();
+        uint8_t*       colorData = colorPx.getAddress();
+        const int32_t  maskBpr   = maskPx.getBytesPerRow();
+        const int32_t  colorBpr  = colorPx.getBytesPerRow();
+        const int32_t  colorBpp  = colorBpr / static_cast<int32_t>(kWidth);
+
+        for (uint32_t y = 0; y < kHeight; ++y)
+        {
+            for (uint32_t x = 0; x < kWidth; ++x)
+            {
+                const float alpha = maskData[y * maskBpr + x] / 255.0f;
+                if (alpha >= 1.0f) continue;
+
+                uint8_t* cp = colorData + y * colorBpr + x * colorBpp;
+                if (colorBpp == 8)
+                {
+                    uint16_t ch[4]; std::memcpy(ch, cp, 8);
+                    for (int c = 0; c < 4; ++c)
+                        ch[c] = floatToHalf(halfToFloat(ch[c]) * alpha);
+                    std::memcpy(cp, ch, 8);
+                }
+                else
+                {
+                    for (int c = 0; c < 4; ++c)
+                        cp[c] = static_cast<uint8_t>(cp[c] * alpha + 0.5f);
+                }
+            }
+        }
+    }
+
+    // 4. Cream/blue checkerboard background to expose alpha blending.
+    {
+        const Color bgCream = colorFromHex(0xF6E7D7u);
+        const Color bgBlue  = colorFromHex(0xD9EAF8u);
+        constexpr float tile = 16.f;
+
+        g.clear(bgCream);
+        auto checkerBrush = g.createSolidColorBrush(bgBlue);
+        for (float y = 0.f; y < static_cast<float>(kHeight); y += tile)
+            for (float x = ((static_cast<int>(y / tile)) & 1) ? tile : 0.f; x < static_cast<float>(kWidth); x += tile * 2.f)
+                g.fillRectangle({x, y, x + tile, y + tile}, checkerBrush);
+    }
+
+    auto resultBmp = colorRT.getBitmap();
+    g.drawBitmap(resultBmp, {0.f, 0.f, 64.f, 64.f}, {0.f, 0.f, 64.f, 64.f},
+                 1.0f, BitmapInterpolationMode::NearestNeighbor);
+
+    EXPECT_TRUE(checkResult("eightBitMaskBitmapToOutput", 0, 4.0));
+}
+
+// Neumorphic "dip" over a checkerboard background.
+// Inner shadows are rendered to a transparent image, masked to the shape,
+// then composited over the checkerboard so the background shows through.
+TEST_F(DrawingTest, BlurNeumorphicDipCheckerboard)
+{
+    constexpr uint32_t kW = 128, kH = 128;
+    constexpr int32_t kEightBit = (int32_t)BitmapRenderTargetFlags::EightBitPixels
+                                | (int32_t)BitmapRenderTargetFlags::CpuReadable;
+    constexpr int32_t kColorCpu = (int32_t)BitmapRenderTargetFlags::CpuReadable;
+
+    auto factory = g.getFactory();
+
+    const RoundedRect shape{ {24.f, 24.f, 104.f, 104.f}, 16.f, 16.f };
+    const Rect bounds{ 0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH) };
+    constexpr float offset = 4.f;
+
+    // Helper: full-canvas rect with a shifted rounded-rect hole punched out.
+    auto makeHoleGeom = [&](Graphics& ctx, float dx, float dy) {
+        auto geom = ctx.getFactory().createPathGeometry();
+        auto sink = geom.open();
+        sink.setFillMode(FillMode::Alternate);
+        sink.addRect({0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH)}, FigureBegin::Filled);
+        sink.addRoundedRect({{shape.rect.left + dx, shape.rect.top + dy,
+                              shape.rect.right + dx, shape.rect.bottom + dy},
+                             shape.radiusX, shape.radiusY});
+        sink.close();
+        return geom;
+    };
+
+    // --- 1. Render inner shadows to a transparent colour image ---
+    auto shadowRT = factory.createCpuRenderTarget({kW, kH}, kColorCpu);
+    shadowRT.beginDraw();
+    shadowRT.clear(Color{0.f, 0.f, 0.f, 0.f});
+    {
+        Graphics gShadow(AccessPtr::get(shadowRT));
+
+        cachedBlur innerDark;
+        innerDark.tint = Color{0.f, 0.f, 0.f, 0.5f};
+        innerDark.draw(gShadow, bounds, [&](Graphics& m) {
+            auto darkGeom = makeHoleGeom(m, offset, offset);
+            auto brush = m.createSolidColorBrush(Colors::White);
+            m.fillGeometry(darkGeom, brush);
+        });
+
+        cachedBlur innerLight;
+        innerLight.tint = Color{1.f, 1.f, 1.f, 0.8f};
+        innerLight.draw(gShadow, bounds, [&](Graphics& m) {
+            auto lightGeom = makeHoleGeom(m, -offset, -offset);
+            auto brush = m.createSolidColorBrush(Colors::White);
+            m.fillGeometry(lightGeom, brush);
+        });
+    }
+    shadowRT.endDraw();
+
+    // --- 2. Render shape mask: 8bpp mono, white inside rounded rect ---
+    auto maskRT = factory.createCpuRenderTarget({kW, kH}, kEightBit);
+    maskRT.beginDraw();
+    maskRT.clear(Color{0.f, 0.f, 0.f, 0.f});
+    {
+        Graphics gMask(AccessPtr::get(maskRT));
+        auto whiteBrush = gMask.createSolidColorBrush(Colors::White);
+        gMask.fillRoundedRectangle(shape, whiteBrush);
+    }
+    maskRT.endDraw();
+
+    // --- 3. Apply mask to shadow image pixel-by-pixel ---
+    auto shadowBmp = shadowRT.getBitmap();
+    auto maskBmp   = maskRT.getBitmap();
+    {
+        auto shadowPx = shadowBmp.lockPixels(BitmapLockFlags::ReadWrite);
+        auto maskPx   = maskBmp.lockPixels(BitmapLockFlags::Read);
+
+        uint8_t*       shadowData = shadowPx.getAddress();
+        const uint8_t* maskData   = maskPx.getAddress();
+        const int32_t  shadowBpr  = shadowPx.getBytesPerRow();
+        const int32_t  maskBpr    = maskPx.getBytesPerRow();
+        const int32_t  shadowBpp  = shadowBpr / static_cast<int32_t>(kW);
+
+        for (uint32_t y = 0; y < kH; ++y)
+        {
+            for (uint32_t x = 0; x < kW; ++x)
+            {
+                const float maskVal = maskData[y * maskBpr + x] / 255.0f;
+                if (maskVal >= 1.0f) continue;
+
+                uint8_t* sp = shadowData + y * shadowBpr + x * shadowBpp;
+                if (shadowBpp == 8)
+                {
+                    uint16_t ch[4]; std::memcpy(ch, sp, 8);
+                    for (int c = 0; c < 4; ++c)
+                        ch[c] = floatToHalf(halfToFloat(ch[c]) * maskVal);
+                    std::memcpy(sp, ch, 8);
+                }
+                else
+                {
+                    for (int c = 0; c < 4; ++c)
+                        sp[c] = static_cast<uint8_t>(sp[c] * maskVal + 0.5f);
+                }
+            }
+        }
+    }
+
+    // --- 4. Draw checkerboard background then composite masked shadow ---
+    auto bigRT = factory.createCpuRenderTarget({kW, kH}, kRenderFlags);
+    bigRT.beginDraw();
+    {
+        const Color bgCream = colorFromHex(0xF6E7D7u);
+        const Color bgBlue  = colorFromHex(0xD9EAF8u);
+        constexpr float tile = 16.f;
+
+        bigRT.clear(bgCream);
+        auto checkerBrush = bigRT.createSolidColorBrush(bgBlue);
+        for (float cy = 0.f; cy < static_cast<float>(kH); cy += tile)
+            for (float cx = ((static_cast<int>(cy / tile)) & 1) ? tile : 0.f; cx < static_cast<float>(kW); cx += tile * 2.f)
+                bigRT.fillRectangle({cx, cy, cx + tile, cy + tile}, checkerBrush);
+
+        Graphics gRT(AccessPtr::get(bigRT));
+        auto finalBmp = shadowRT.getBitmap();
+        gRT.drawBitmap(finalBmp, bounds, bounds);
+    }
+    bigRT.endDraw();
+
+    EXPECT_TRUE(checkBitmap("blurNeumorphicDipCheckerboard", bigRT, 2, 4.0));
+}
+
+// Neumorphic "bump" over a checkerboard background.
+// Outer drop shadows are rendered to a transparent image, masked to remove
+// the area under the raised shape, then composited over the checkerboard.
+TEST_F(DrawingTest, BlurNeumorphicBumpCheckerboard)
+{
+    constexpr uint32_t kW = 128, kH = 128;
+    constexpr int32_t kEightBit = (int32_t)BitmapRenderTargetFlags::EightBitPixels
+                                | (int32_t)BitmapRenderTargetFlags::CpuReadable;
+    constexpr int32_t kColorCpu = (int32_t)BitmapRenderTargetFlags::CpuReadable;
+
+    auto factory = g.getFactory();
+
+    const RoundedRect shape{ {24.f, 24.f, 104.f, 104.f}, 16.f, 16.f };
+    const Rect bounds{ 0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH) };
+    constexpr float offset = 4.f;
+
+    // --- 1. Render outer drop shadows to a transparent colour image ---
+    auto shadowRT = factory.createCpuRenderTarget({kW, kH}, kColorCpu);
+    shadowRT.beginDraw();
+    shadowRT.clear(Color{0.f, 0.f, 0.f, 0.f});
+    {
+        Graphics gShadow(AccessPtr::get(shadowRT));
+
+        // Dark shadow (bottom-right): shape shifted up-left so blur spills down-right.
+        cachedBlur darkShadow;
+        darkShadow.tint = Color{0.f, 0.f, 0.f, 0.5f};
+        darkShadow.draw(gShadow, bounds, [&](Graphics& m) {
+            auto brush = m.createSolidColorBrush(Colors::White);
+            RoundedRect shifted = shape;
+            shifted.rect = offsetRect(shifted.rect, Size{-offset, -offset});
+            m.fillRoundedRectangle(shifted, brush);
+        });
+
+        // Light shadow (top-left): shape shifted down-right so blur spills up-left.
+        cachedBlur lightShadow;
+        lightShadow.tint = Color{1.f, 1.f, 1.f, 0.7f};
+        lightShadow.draw(gShadow, bounds, [&](Graphics& m) {
+            auto brush = m.createSolidColorBrush(Colors::White);
+            RoundedRect shifted = shape;
+            shifted.rect = offsetRect(shifted.rect, Size{offset, offset});
+            m.fillRoundedRectangle(shifted, brush);
+        });
+    }
+    shadowRT.endDraw();
+
+    // --- 2. Render inverted shape mask: 8bpp mono, white OUTSIDE the shape ---
+    // Clear to transparent, then fill a hole geometry (full rect minus rounded rect)
+    // so only the exterior is opaque. D2D source-over can't erase pixels, so we
+    // draw the exterior shape rather than trying to punch a hole.
+    auto maskRT = factory.createCpuRenderTarget({kW, kH}, kEightBit);
+    maskRT.beginDraw();
+    maskRT.clear(Color{0.f, 0.f, 0.f, 0.f}); // transparent everywhere
+    {
+        Graphics gMask(AccessPtr::get(maskRT));
+        auto geom = gMask.getFactory().createPathGeometry();
+        auto sink = geom.open();
+        sink.setFillMode(FillMode::Alternate);
+        sink.addRect({0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH)}, FigureBegin::Filled);
+        sink.addRoundedRect(shape);
+        sink.close();
+        auto whiteBrush = gMask.createSolidColorBrush(Colors::White);
+        gMask.fillGeometry(geom, whiteBrush);
+    }
+    maskRT.endDraw();
+
+    // --- 3. Apply mask to shadow image pixel-by-pixel ---
+    auto shadowBmp = shadowRT.getBitmap();
+    auto maskBmp   = maskRT.getBitmap();
+    {
+        auto shadowPx = shadowBmp.lockPixels(BitmapLockFlags::ReadWrite);
+        auto maskPx   = maskBmp.lockPixels(BitmapLockFlags::Read);
+
+        uint8_t*       shadowData = shadowPx.getAddress();
+        const uint8_t* maskData   = maskPx.getAddress();
+        const int32_t  shadowBpr  = shadowPx.getBytesPerRow();
+        const int32_t  maskBpr    = maskPx.getBytesPerRow();
+        const int32_t  shadowBpp  = shadowBpr / static_cast<int32_t>(kW);
+
+        for (uint32_t y = 0; y < kH; ++y)
+        {
+            for (uint32_t x = 0; x < kW; ++x)
+            {
+                const float maskVal = maskData[y * maskBpr + x] / 255.0f;
+                if (maskVal >= 1.0f) continue;
+
+                uint8_t* sp = shadowData + y * shadowBpr + x * shadowBpp;
+                if (shadowBpp == 8)
+                {
+                    uint16_t ch[4]; std::memcpy(ch, sp, 8);
+                    for (int c = 0; c < 4; ++c)
+                        ch[c] = floatToHalf(halfToFloat(ch[c]) * maskVal);
+                    std::memcpy(sp, ch, 8);
+                }
+                else
+                {
+                    for (int c = 0; c < 4; ++c)
+                        sp[c] = static_cast<uint8_t>(sp[c] * maskVal + 0.5f);
+                }
+            }
+        }
+    }
+
+    // --- 4. Checkerboard background, then composite masked shadows ---
+    auto bigRT = factory.createCpuRenderTarget({kW, kH}, kRenderFlags);
+    bigRT.beginDraw();
+    {
+        const Color bgCream = colorFromHex(0xF6E7D7u);
+        const Color bgBlue  = colorFromHex(0xD9EAF8u);
+        constexpr float tile = 16.f;
+
+        bigRT.clear(bgCream);
+        auto checkerBrush = bigRT.createSolidColorBrush(bgBlue);
+        for (float cy = 0.f; cy < static_cast<float>(kH); cy += tile)
+            for (float cx = ((static_cast<int>(cy / tile)) & 1) ? tile : 0.f; cx < static_cast<float>(kW); cx += tile * 2.f)
+                bigRT.fillRectangle({cx, cy, cx + tile, cy + tile}, checkerBrush);
+
+        Graphics gRT(AccessPtr::get(bigRT));
+        auto finalBmp = shadowRT.getBitmap();
+        gRT.drawBitmap(finalBmp, bounds, bounds);
+    }
+    bigRT.endDraw();
+
+    EXPECT_TRUE(checkBitmap("blurNeumorphicBumpCheckerboard", bigRT, 2, 4.0));
+}
