@@ -2429,3 +2429,120 @@ TEST_F(DrawingTest, BlurNeumorphicBumpCheckerboard)
 
     EXPECT_TRUE(checkBitmap("blurNeumorphicBumpCheckerboard", bigRT, 2, 4.0));
 }
+
+// Additive pixel blending: draw coloured "lights" at hex-grid positions.
+// Each light is a premultiplied bitmap with alpha=0, so it adds colour to
+// the background without occluding it.  Extra-dense lights near the centre
+// demonstrate additive colour mixing (R+G=Y, R+B=M, G+B=C, R+G+B=W).
+TEST_F(DrawingTest, AdditivePixels)
+{
+    constexpr uint32_t kW = 128, kH = 128;
+    constexpr int32_t kColorCpu = (int32_t)BitmapRenderTargetFlags::CpuReadable;
+
+    auto factory = g.getFactory();
+
+    // --- Light definitions ---
+    struct Light { float x, y, r, g, b; };
+    std::vector<Light> lights;
+
+    // Six saturated hues to cycle through on the hex grid.
+    constexpr float hues[][3] = {
+        {1.f, 0.f, 0.f},  // red
+        {1.f, 1.f, 0.f},  // yellow
+        {0.f, 1.f, 0.f},  // green
+        {0.f, 1.f, 1.f},  // cyan
+        {0.f, 0.f, 1.f},  // blue
+        {1.f, 0.f, 1.f},  // magenta
+    };
+    constexpr int nHues = 6;
+
+    // Hex grid covering the image.
+    constexpr float spacing = 24.f;
+    constexpr float vSpacing = spacing * 0.866025f; // sqrt(3)/2
+    const float cx = kW * 0.5f, cy = kH * 0.5f;
+    int hueIdx = 0;
+
+    for (int row = -3; row <= 3; ++row)
+    {
+        float y = cy + row * vSpacing;
+        float xOff = (row & 1) ? spacing * 0.5f : 0.f;
+        for (int col = -3; col <= 3; ++col)
+        {
+            float x = cx + col * spacing + xOff;
+            if (x < -10.f || x > kW + 10.f || y < -10.f || y > kH + 10.f)
+                continue;
+
+            const auto& h = hues[hueIdx % nHues];
+            lights.push_back({x, y, h[0], h[1], h[2]});
+            ++hueIdx;
+        }
+    }
+
+    // Extra-dense cluster near the centre: small hex ring + centre light.
+    constexpr float innerSpacing = 10.f;
+    for (int i = 0; i < 6; ++i)
+    {
+        float angle = i * 3.14159265f / 3.f;
+        float x = cx + innerSpacing * std::cos(angle);
+        float y = cy + innerSpacing * std::sin(angle);
+        const auto& h = hues[i];
+        lights.push_back({x, y, h[0], h[1], h[2]});
+    }
+    // White centre light.
+    lights.push_back({cx, cy, 1.f, 1.f, 1.f});
+
+    // --- Build the additive light bitmap ---
+    // SRGBPixels → 32bpp PBGRA, so setPixel() writes ARGB packed uint32_t.
+    auto lightBmp = factory.createImage({kW, kH},
+        (int32_t)BitmapRenderTargetFlags::SRGBPixels);
+    {
+        auto pixels = lightBmp.lockPixels(BitmapLockFlags::Write);
+
+        constexpr float sigma = 10.f;
+        constexpr float invTwoSigma2 = 1.f / (2.f * sigma * sigma);
+
+        for (uint32_t py = 0; py < kH; ++py)
+        {
+            for (uint32_t px = 0; px < kW; ++px)
+            {
+                // Accumulate additive contributions in linear RGB.
+                float linR = 0.f, linG = 0.f, linB = 0.f;
+
+                for (const auto& L : lights)
+                {
+                    float dx = px - L.x;
+                    float dy = py - L.y;
+                    float d2 = dx * dx + dy * dy;
+                    float brightness = std::exp(-d2 * invTwoSigma2) * 0.6f;
+
+                    linR += L.r * brightness;
+                    linG += L.g * brightness;
+                    linB += L.b * brightness;
+                }
+
+                // Premultiply in linear space, then convert to sRGB.
+                // Alpha = 0 makes this purely additive (SRC_OVER adds colour
+                // without reducing the background).
+                uint8_t sR = linearToSRGB_f(std::min(linR, 1.f));
+                uint8_t sG = linearToSRGB_f(std::min(linG, 1.f));
+                uint8_t sB = linearToSRGB_f(std::min(linB, 1.f));
+
+                uint32_t argb = (0u << 24) | (uint32_t(sR) << 16)
+                              | (uint32_t(sG) << 8) | uint32_t(sB);
+                pixels.setPixel(px, py, argb);
+            }
+        }
+    }
+
+    // --- Dark background + composite ---
+    auto bigRT = factory.createCpuRenderTarget({kW, kH}, kColorCpu);
+    bigRT.beginDraw();
+    bigRT.clear(Color{0.04f, 0.04f, 0.06f, 1.f}); // near-black
+
+    Rect full{0.f, 0.f, float(kW), float(kH)};
+    bigRT.drawBitmap(lightBmp, full, full);
+
+    bigRT.endDraw();
+
+    EXPECT_TRUE(checkBitmap("additivePixels", bigRT, 2, 4.0));
+}
