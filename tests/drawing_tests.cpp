@@ -40,6 +40,7 @@
 #include "backends/CocoaGfx.h"
 #endif
 #include "Drawing.h"
+#include "helpers/BitmapMask.h"
 #include "helpers/CachedBlur.h"
 
 using namespace gmpi::drawing;
@@ -356,12 +357,13 @@ protected:
     // giving accurate colour round-trips with no 8-bit linear quantisation.
     static constexpr int32_t kRenderFlags = 0;
 
-#ifdef _WIN32
-    std::unique_ptr<gmpi::directx::Factory> drawingFactory;
-#endif
-#ifdef __APPLE__
-    std::unique_ptr<gmpi::cocoa::Factory> drawingFactory;
-#endif
+//#ifdef _WIN32
+//    std::unique_ptr<gmpi::directx::Factory> drawingFactory;
+//#endif
+//#ifdef __APPLE__
+//    std::unique_ptr<gmpi::cocoa::Factory> drawingFactory;
+//#endif
+    gmpi::drawing::Factory drawingFactory;
     gmpi::drawing::BitmapRenderTarget g;
     bool drawingActive = false;
 
@@ -372,14 +374,19 @@ protected:
 
     void SetUp() override
     {
+        auto native_ptr = AccessPtr::put(drawingFactory);
 #ifdef _WIN32
         CoInitialize(nullptr);
-        drawingFactory = std::make_unique<gmpi::directx::Factory>();
+        *native_ptr = new gmpi::directx::Factory();
 #endif
 #ifdef __APPLE__
-        dxFactory = std::make_unique<gmpi::cocoa::Factory>();
+        *native_ptr = new gmpi::cocoa::Factory();
 #endif
-        drawingFactory->createCpuRenderTarget({kWidth, kHeight}, kRenderFlags, AccessPtr::put(g));
+        //auto native_ptr = (gmpi::drawing::api::IBitmapRenderTarget**)AccessPtr::put(g);
+        //drawingFactory->createCpuRenderTarget({kWidth, kHeight}, kRenderFlags, native_ptr);
+
+        g = drawingFactory.createCpuRenderTarget({ kWidth, kHeight }, kRenderFlags);
+
         g.beginDraw();
         drawingActive = true;
         g.clear(Colors::White);
@@ -416,7 +423,11 @@ protected:
     {
         constexpr uint32_t kPat = 8;
         gmpi::drawing::BitmapRenderTarget patRT;
-        drawingFactory->createCpuRenderTarget({kPat, kPat}, kRenderFlags, AccessPtr::put(patRT));
+        auto native_ptr = (gmpi::drawing::api::IBitmapRenderTarget**)AccessPtr::put(patRT);
+        drawingFactory->createCpuRenderTarget({kPat, kPat}, kRenderFlags, native_ptr);
+
+        auto patRT = 
+
         patRT.beginDraw();
         patRT.clear(color1);
         auto b2 = patRT.createSolidColorBrush(color2);
@@ -1803,51 +1814,7 @@ TEST_F(DrawingTest, BlurNeumorphicBump)
     auto mask = alphaMask.getBitmap();
     auto image = image_rt.getBitmap();
 
-    {
-        auto maskPixels = mask.lockPixels(BitmapLockFlags::Read);
-        auto imagePixels = image.lockPixels(BitmapLockFlags::ReadWrite);
-        ASSERT_TRUE(maskPixels && imagePixels);
-
-        const auto maskSize = mask.getSize();
-        const auto imageSize = image.getSize();
-        ASSERT_EQ(maskSize.width, imageSize.width);
-        ASSERT_EQ(maskSize.height, imageSize.height);
-
-        const uint8_t* maskData = maskPixels.getAddress();
-        uint8_t* imageData = imagePixels.getAddress();
-        const int32_t maskBpr = maskPixels.getBytesPerRow();
-        const int32_t imageBpr = imagePixels.getBytesPerRow();
-        const int32_t imageBpp = imageBpr / static_cast<int32_t>(imageSize.width);
-
-        for(uint32_t y = 0; y < imageSize.height; ++y)
-        {
-            const uint8_t* maskRow = maskData + y * maskBpr;
-            uint8_t* imageRow = imageData + y * imageBpr;
-
-            for(uint32_t x = 0; x < imageSize.width; ++x)
-            {
-                const uint8_t maskAlpha = maskRow[x];
-                const float alpha = maskAlpha / 255.0f;
-
-                if(imageBpp == 8)
-                {
-                    auto* pixel = reinterpret_cast<uint16_t*>(imageRow + x * 8);
-                    pixel[0] = floatToHalf(halfToFloat(pixel[0]) * alpha);
-                    pixel[1] = floatToHalf(halfToFloat(pixel[1]) * alpha);
-                    pixel[2] = floatToHalf(halfToFloat(pixel[2]) * alpha);
-                    pixel[3] = floatToHalf(alpha);
-                }
-                else
-                {
-                    uint8_t* pixel = imageRow + x * 4;
-                    pixel[0] = static_cast<uint8_t>(pixel[0] * alpha + 0.5f);
-                    pixel[1] = static_cast<uint8_t>(pixel[1] * alpha + 0.5f);
-                    pixel[2] = static_cast<uint8_t>(pixel[2] * alpha + 0.5f);
-                    pixel[3] = maskAlpha;
-                }
-            }
-        }
-    }
+    applyMask(image, mask);
     
     auto g_output = factory.createCpuRenderTarget({ kW, kH }, kRenderFlags);
     g_output.beginDraw();
@@ -2046,57 +2013,11 @@ TEST_F(DrawingTest, BlurNeumorphicDip)
         }
         maskRT.endDraw();
 
-        // --- 3. Clip shadow to shape interior by modifying alpha only ---
-        // Inside the shape mask=1 → alpha unchanged.
-        // Outside mask=0 → alpha zeroed → pixel becomes transparent.
-        // At AA edges fractional mask values produce a smooth transition.
-        // shadowRT may be 64bppPRGBAHalf (8 bpp, alpha at h[3] = bytes [6:7])
-        // or 32bppPBGRA (4 bpp, alpha at byte [3]) depending on kRenderFlags.
-        // maskRT is 8bpp alpha-only (1 byte per pixel).
+        // --- 3. Apply mask to shadow image.
         {
             auto shadowBmp = shadowRT.getBitmap();
             auto maskBmp   = maskRT.getBitmap();
-
-            auto shadowPx = shadowBmp.lockPixels(BitmapLockFlags::ReadWrite);
-            auto maskPx   = maskBmp.lockPixels(BitmapLockFlags::Read);
-
-            uint8_t*       shadowData = shadowPx.getAddress();
-            const uint8_t* maskData   = maskPx.getAddress();
-            const int32_t  shadowBpr  = shadowPx.getBytesPerRow();
-            const int32_t  maskBpr    = maskPx.getBytesPerRow();
-            const int32_t  shadowBpp  = shadowBpr / static_cast<int32_t>(kW);
-
-            for (uint32_t y = 0; y < kH; ++y)
-            {
-                for (uint32_t x = 0; x < kW; ++x)
-                {
-                    // Mask is 8bpp alpha: 1 byte per pixel, 255 inside shape, 0 outside.
-                    const float maskVal = maskData[y * maskBpr + x] / 255.0f;
-                    if (maskVal >= 1.0f) continue; // fully inside: nothing to do
-
-                    uint8_t* sp = shadowData + y * shadowBpr + x * shadowBpp;
-
-                    if (shadowBpp == 8)
-                    {
-                        // 64bppPRGBAHalf: premultiplied RGBA, scale all 4 channels
-                        // so that both colour and alpha are attenuated consistently.
-                        uint16_t ch[4]; std::memcpy(ch, sp, 8);
-                        for (int c = 0; c < 4; ++c)
-                        {
-                            float v = halfToFloat(ch[c]) * maskVal;
-                            ch[c]   = floatToHalf(v);
-                        }
-                        std::memcpy(sp, ch, 8);
-                    }
-                    else
-                    {
-                        // 32bppPBGRA: premultiplied BGRA, scale all 4 channels.
-                        for (int c = 0; c < 4; ++c)
-                            sp[c] = static_cast<uint8_t>(sp[c] * maskVal + 0.5f);
-                    }
-                }
-            }
-            // shadowPx / maskPx unlock here via RAII
+            applyMask(shadowBmp, maskBmp);
         }
 
         // --- 4. Composite the masked shadow overlay onto bigRT ---
@@ -2182,42 +2103,10 @@ TEST_F(DrawingTest, EightBitMaskBitmapToOutput)
     colorRT.clear(Colors::DodgerBlue);
     colorRT.endDraw();
 
-    // 3. Apply mask to colour image: multiply all channels by mask alpha.
+    // 3. Apply mask to colour image.
     auto maskBmp  = maskRT.getBitmap();
     auto colorBmp = colorRT.getBitmap();
-    {
-        auto maskPx  = maskBmp.lockPixels(BitmapLockFlags::Read);
-        auto colorPx = colorBmp.lockPixels(BitmapLockFlags::ReadWrite);
-
-        const uint8_t* maskData  = maskPx.getAddress();
-        uint8_t*       colorData = colorPx.getAddress();
-        const int32_t  maskBpr   = maskPx.getBytesPerRow();
-        const int32_t  colorBpr  = colorPx.getBytesPerRow();
-        const int32_t  colorBpp  = colorBpr / static_cast<int32_t>(kWidth);
-
-        for (uint32_t y = 0; y < kHeight; ++y)
-        {
-            for (uint32_t x = 0; x < kWidth; ++x)
-            {
-                const float alpha = maskData[y * maskBpr + x] / 255.0f;
-                if (alpha >= 1.0f) continue;
-
-                uint8_t* cp = colorData + y * colorBpr + x * colorBpp;
-                if (colorBpp == 8)
-                {
-                    uint16_t ch[4]; std::memcpy(ch, cp, 8);
-                    for (int c = 0; c < 4; ++c)
-                        ch[c] = floatToHalf(halfToFloat(ch[c]) * alpha);
-                    std::memcpy(cp, ch, 8);
-                }
-                else
-                {
-                    for (int c = 0; c < 4; ++c)
-                        cp[c] = static_cast<uint8_t>(cp[c] * alpha + 0.5f);
-                }
-            }
-        }
-    }
+    applyMask(colorBmp, maskBmp);
 
     // 4. Cream/blue checkerboard background to expose alpha blending.
     {
@@ -2304,42 +2193,10 @@ TEST_F(DrawingTest, BlurNeumorphicDipCheckerboard)
     }
     maskRT.endDraw();
 
-    // --- 3. Apply mask to shadow image pixel-by-pixel ---
+    // --- 3. Apply mask to shadow image.
     auto shadowBmp = shadowRT.getBitmap();
     auto maskBmp   = maskRT.getBitmap();
-    {
-        auto shadowPx = shadowBmp.lockPixels(BitmapLockFlags::ReadWrite);
-        auto maskPx   = maskBmp.lockPixels(BitmapLockFlags::Read);
-
-        uint8_t*       shadowData = shadowPx.getAddress();
-        const uint8_t* maskData   = maskPx.getAddress();
-        const int32_t  shadowBpr  = shadowPx.getBytesPerRow();
-        const int32_t  maskBpr    = maskPx.getBytesPerRow();
-        const int32_t  shadowBpp  = shadowBpr / static_cast<int32_t>(kW);
-
-        for (uint32_t y = 0; y < kH; ++y)
-        {
-            for (uint32_t x = 0; x < kW; ++x)
-            {
-                const float maskVal = maskData[y * maskBpr + x] / 255.0f;
-                if (maskVal >= 1.0f) continue;
-
-                uint8_t* sp = shadowData + y * shadowBpr + x * shadowBpp;
-                if (shadowBpp == 8)
-                {
-                    uint16_t ch[4]; std::memcpy(ch, sp, 8);
-                    for (int c = 0; c < 4; ++c)
-                        ch[c] = floatToHalf(halfToFloat(ch[c]) * maskVal);
-                    std::memcpy(sp, ch, 8);
-                }
-                else
-                {
-                    for (int c = 0; c < 4; ++c)
-                        sp[c] = static_cast<uint8_t>(sp[c] * maskVal + 0.5f);
-                }
-            }
-        }
-    }
+    applyMask(shadowBmp, maskBmp);
 
     // --- 4. Draw checkerboard background then composite masked shadow ---
     auto bigRT = factory.createCpuRenderTarget({kW, kH}, kRenderFlags);
@@ -2387,20 +2244,20 @@ TEST_F(DrawingTest, BlurNeumorphicBumpCheckerboard)
     {
         Graphics gShadow(AccessPtr::get(shadowRT));
 
-        // Dark shadow (bottom-right): shape shifted up-left so blur spills down-right.
-        cachedBlur darkShadow;
-        darkShadow.tint = Color{0.f, 0.f, 0.f, 0.5f};
-        darkShadow.draw(gShadow, bounds, [&](Graphics& m) {
+        // Light shadow (top-left): shape shifted down-right so blur spills up-left.
+        cachedBlur lightShadow;
+        lightShadow.tint = Color{1.f, 1.f, 1.f, 0.7f};
+        lightShadow.draw(gShadow, bounds, [&](Graphics& m) {
             auto brush = m.createSolidColorBrush(Colors::White);
             RoundedRect shifted = shape;
             shifted.rect = offsetRect(shifted.rect, Size{-offset, -offset});
             m.fillRoundedRectangle(shifted, brush);
         });
 
-        // Light shadow (top-left): shape shifted down-right so blur spills up-left.
-        cachedBlur lightShadow;
-        lightShadow.tint = Color{1.f, 1.f, 1.f, 0.7f};
-        lightShadow.draw(gShadow, bounds, [&](Graphics& m) {
+        // Dark shadow (bottom-right): shape shifted up-left so blur spills down-right.
+        cachedBlur darkShadow;
+        darkShadow.tint = Color{0.f, 0.f, 0.f, 0.5f};
+        darkShadow.draw(gShadow, bounds, [&](Graphics& m) {
             auto brush = m.createSolidColorBrush(Colors::White);
             RoundedRect shifted = shape;
             shifted.rect = offsetRect(shifted.rect, Size{offset, offset});
@@ -2430,41 +2287,10 @@ TEST_F(DrawingTest, BlurNeumorphicBumpCheckerboard)
     maskRT.endDraw();
 
     // --- 3. Apply mask to shadow image pixel-by-pixel ---
+    // --- 3. Apply mask to shadow image.
     auto shadowBmp = shadowRT.getBitmap();
     auto maskBmp   = maskRT.getBitmap();
-    {
-        auto shadowPx = shadowBmp.lockPixels(BitmapLockFlags::ReadWrite);
-        auto maskPx   = maskBmp.lockPixels(BitmapLockFlags::Read);
-
-        uint8_t*       shadowData = shadowPx.getAddress();
-        const uint8_t* maskData   = maskPx.getAddress();
-        const int32_t  shadowBpr  = shadowPx.getBytesPerRow();
-        const int32_t  maskBpr    = maskPx.getBytesPerRow();
-        const int32_t  shadowBpp  = shadowBpr / static_cast<int32_t>(kW);
-
-        for (uint32_t y = 0; y < kH; ++y)
-        {
-            for (uint32_t x = 0; x < kW; ++x)
-            {
-                const float maskVal = maskData[y * maskBpr + x] / 255.0f;
-                if (maskVal >= 1.0f) continue;
-
-                uint8_t* sp = shadowData + y * shadowBpr + x * shadowBpp;
-                if (shadowBpp == 8)
-                {
-                    uint16_t ch[4]; std::memcpy(ch, sp, 8);
-                    for (int c = 0; c < 4; ++c)
-                        ch[c] = floatToHalf(halfToFloat(ch[c]) * maskVal);
-                    std::memcpy(sp, ch, 8);
-                }
-                else
-                {
-                    for (int c = 0; c < 4; ++c)
-                        sp[c] = static_cast<uint8_t>(sp[c] * maskVal + 0.5f);
-                }
-            }
-        }
-    }
+    applyMask(shadowBmp, maskBmp);
 
     // --- 4. Checkerboard background, then composite masked shadows ---
     auto bigRT = factory.createCpuRenderTarget({kW, kH}, kRenderFlags);
