@@ -1685,9 +1685,9 @@ TEST_F(DrawingTest, BlurTextShadow)
 
     auto tf = makeTextFormat(20.f);
 
-    const Rect textRect{10.f, 14.f, 120.f, 50.f};
+    const gmpi::drawing::Rect textRect{10.f, 14.f, 120.f, 50.f};
     constexpr float shadowOffX = 2.f, shadowOffY = 2.f;
-    const Rect bounds{0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH)};
+    const gmpi::drawing::Rect bounds{0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH)};
 
     // Draw shadow: blurred dark text offset down-right.
     cachedBlur shadow;
@@ -1718,8 +1718,8 @@ TEST_F(DrawingTest, BlurTextGlow)
 
     auto tf = makeTextFormat(20.f);
 
-    const Rect textRect{10.f, 14.f, 120.f, 50.f};
-    const Rect bounds{0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH)};
+    const gmpi::drawing::Rect textRect{10.f, 14.f, 120.f, 50.f};
+    const gmpi::drawing::Rect bounds{0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH)};
 
     // Draw glow: blurred lime around the text (no offset).
     cachedBlur glow;
@@ -1750,7 +1750,7 @@ TEST_F(DrawingTest, BlurNeumorphicBump)
 	{
         image_rt.beginDraw();
 
-		const Rect bounds{ 0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH) };
+		const gmpi::drawing::Rect bounds{ 0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH) };
 		constexpr float offset = 4.f;
 
 		// Dark shadow (bottom-right): draw shape shifted up-left so blur spills down-right.
@@ -1759,7 +1759,7 @@ TEST_F(DrawingTest, BlurNeumorphicBump)
 		darkShadow.draw(image_rt, bounds, [&](Graphics& mask) {
 			auto brush = mask.createSolidColorBrush(Colors::White);
 			RoundedRect shifted = shape;
-			shifted.rect = offsetRect(shifted.rect, Size{ -offset, -offset });
+			shifted.rect = offsetRect(shifted.rect, gmpi::drawing::Size{ -offset, -offset });
 			mask.fillRoundedRectangle(shifted, brush);
 			});
 
@@ -1769,7 +1769,7 @@ TEST_F(DrawingTest, BlurNeumorphicBump)
 		lightShadow.draw(image_rt, bounds, [&](Graphics& mask) {
 			auto brush = mask.createSolidColorBrush(Colors::White);
 			RoundedRect shifted = shape;
-			shifted.rect = offsetRect(shifted.rect, Size{ offset, offset });
+			shifted.rect = offsetRect(shifted.rect, gmpi::drawing::Size{ offset, offset });
 			mask.fillRoundedRectangle(shifted, brush);
 			});
 	}
@@ -1845,7 +1845,7 @@ TEST_F(DrawingTest, BlurNeumorphicDip)
         bigRT.clear(bgColor);
 
         const RoundedRect shape{ {24.f, 24.f, 104.f, 104.f}, 16.f, 16.f };
-        const Rect bounds{ 0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH) };
+        const gmpi::drawing::Rect bounds{ 0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH) };
         constexpr float offset = 4.f;
 
         // step one a rounded rect hole geometry for the inner shadows: a large rectangle with a rounded-rect hole.
@@ -1923,7 +1923,7 @@ TEST_F(DrawingTest, BlurNeumorphicDip)
         bigRT.clear(bgColor);
 
         const RoundedRect shape{ {24.f, 24.f, 104.f, 104.f}, 16.f, 16.f };
-        const Rect bounds{ 0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH) };
+        const gmpi::drawing::Rect bounds{ 0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH) };
         constexpr float offset = 4.f;
 
         // helper: full-canvas rect with a shifted rounded-rect hole punched out
@@ -2119,21 +2119,29 @@ TEST_F(DrawingTest, SRGBBitmapPixelFormat)
 
     // Verify 32bpp: 4 bytes per pixel → bytesPerRow == width * 4.
     EXPECT_EQ(bpr, static_cast<int32_t>(size.width) * 4)
-        << "Expected 4 bytes per pixel (32bpp PBGRA), got " << bpr
+        << "Expected 4 bytes per pixel (32bpp), got " << bpr
         << " bytes per row for " << size.width << " pixels wide";
 
-    // Centre of red rectangle (32,32) — PBGRA: B=0, G=0, R=255, A=255.
+    // Channel indices: Windows = BGRA, macOS = RGBA.
+#ifdef _WIN32
+    constexpr int iR = 2, iG = 1, iB = 0, iA = 3;
+#else
+    constexpr int iR = 0, iG = 1, iB = 2, iA = 3;
+#endif
+
+    // Centre of red rectangle (32,32) — Red should be 255, G and B near 0.
     const uint8_t* centre = data + 32 * bpr + 32 * 4;
-    EXPECT_EQ(centre[0], 0x00) << "B channel should be 0";
-    EXPECT_EQ(centre[1], 0x00) << "G channel should be 0";
-    EXPECT_EQ(centre[2], 0xFF) << "R channel should be 255";
-    EXPECT_EQ(centre[3], 0xFF) << "A channel should be 255";
+    // macOS calibrated RGB may differ slightly from sRGB primaries.
+    EXPECT_NEAR(centre[iB], 0x00, 5) << "B channel should be ~0";
+    EXPECT_NEAR(centre[iG], 0x00, 40) << "G channel should be ~0";
+    EXPECT_NEAR(centre[iR], 0xFF, 5) << "R channel should be ~255";
+    EXPECT_EQ(centre[iA], 0xFF) << "A channel should be 255";
 
     // Corner (0,0) — outside the rectangle, should be fully transparent.
     const uint8_t* corner = data;
-    EXPECT_EQ(corner[0], 0x00) << "B should be 0 (transparent)";
-    EXPECT_EQ(corner[1], 0x00) << "G should be 0 (transparent)";
-    EXPECT_EQ(corner[2], 0x00) << "R should be 0 (transparent)";
+    EXPECT_EQ(corner[0], 0x00) << "channel 0 should be 0 (transparent)";
+    EXPECT_EQ(corner[1], 0x00) << "channel 1 should be 0 (transparent)";
+    EXPECT_EQ(corner[2], 0x00) << "channel 2 should be 0 (transparent)";
     EXPECT_EQ(corner[3], 0x00) << "A should be 0 (transparent)";
 }
 
@@ -2193,7 +2201,7 @@ TEST_F(DrawingTest, BlurNeumorphicDipCheckerboard)
     auto factory = g.getFactory();
 
     const RoundedRect shape{ {24.f, 24.f, 104.f, 104.f}, 16.f, 16.f };
-    const Rect bounds{ 0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH) };
+    const gmpi::drawing::Rect bounds{ 0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH) };
     constexpr float offset = 4.f;
 
     // Helper: full-canvas rect with a shifted rounded-rect hole punched out.
@@ -2282,7 +2290,7 @@ TEST_F(DrawingTest, BlurNeumorphicBumpCheckerboard)
     auto factory = g.getFactory();
 
     const RoundedRect shape{ {24.f, 24.f, 104.f, 104.f}, 16.f, 16.f };
-    const Rect bounds{ 0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH) };
+    const gmpi::drawing::Rect bounds{ 0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH) };
     constexpr float offset = 4.f;
 
     // --- 1. Render outer drop shadows to a transparent colour image ---
@@ -2296,7 +2304,7 @@ TEST_F(DrawingTest, BlurNeumorphicBumpCheckerboard)
         lightShadow.draw(shadowRT, bounds, [&](Graphics& m) {
             auto brush = m.createSolidColorBrush(Colors::White);
             RoundedRect shifted = shape;
-            shifted.rect = offsetRect(shifted.rect, Size{-offset, -offset});
+            shifted.rect = offsetRect(shifted.rect, gmpi::drawing::Size{-offset, -offset});
             m.fillRoundedRectangle(shifted, brush);
         });
 
@@ -2306,7 +2314,7 @@ TEST_F(DrawingTest, BlurNeumorphicBumpCheckerboard)
         darkShadow.draw(shadowRT, bounds, [&](Graphics& m) {
             auto brush = m.createSolidColorBrush(Colors::White);
             RoundedRect shifted = shape;
-            shifted.rect = offsetRect(shifted.rect, Size{offset, offset});
+            shifted.rect = offsetRect(shifted.rect, gmpi::drawing::Size{offset, offset});
             m.fillRoundedRectangle(shifted, brush);
         });
     }
