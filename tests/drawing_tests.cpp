@@ -30,6 +30,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <sstream>
 #include <string>
 
@@ -49,7 +50,7 @@ using namespace gmpi::drawing::Colors;
 // ============================================================
 // savePng  –  save a GMPI Bitmap to a PNG file
 // ============================================================
-// The bitmap must have been created with the EightBitPixels flag so its
+// The bitmap must have been created with the SRGBPixels flag so its
 // locked pixels are 32bpp (PBGRA on Windows, RGBA on macOS).
 
 #ifdef _WIN32
@@ -352,7 +353,7 @@ protected:
     static constexpr uint32_t kWidth  = 64;
     static constexpr uint32_t kHeight = 64;
 
-    // No EightBitPixels flag → WIC bitmap is 64bppPRGBAHalf (8 bytes/pixel).
+    // No format flag → WIC bitmap is 64bppPRGBAHalf (8 bytes/pixel).
     // This matches the float-precision swapchain used by gmpi_ui on screen,
     // giving accurate colour round-trips with no 8-bit linear quantisation.
     static constexpr int32_t kRenderFlags = 0;
@@ -360,6 +361,12 @@ protected:
     gmpi::drawing::Factory drawingFactory;
     gmpi::drawing::BitmapRenderTarget g;
     bool drawingActive = false;
+#ifdef _WIN32
+    std::unique_ptr<gmpi::directx::Factory> dxFactory;
+#endif
+#ifdef __APPLE__
+    std::unique_ptr<gmpi::cocoa::Factory> cocoaFactory;
+#endif
 
     static std::filesystem::path referenceDir()
     {
@@ -368,13 +375,14 @@ protected:
 
     void SetUp() override
     {
-        auto native_ptr = AccessPtr::put(drawingFactory);
 #ifdef _WIN32
         CoInitialize(nullptr);
-        *native_ptr = new gmpi::directx::Factory();
+        dxFactory = std::make_unique<gmpi::directx::Factory>();
+        *AccessPtr::put(drawingFactory) = dxFactory.get();
 #endif
 #ifdef __APPLE__
-        *native_ptr = new gmpi::cocoa::Factory();
+        cocoaFactory = std::make_unique<gmpi::cocoa::Factory>();
+        *AccessPtr::put(drawingFactory) = cocoaFactory.get();
 #endif
         g = drawingFactory.createCpuRenderTarget({ kWidth, kHeight }, kRenderFlags);
 
@@ -430,7 +438,11 @@ protected:
         g = gmpi::drawing::BitmapRenderTarget{};
         drawingFactory = {};
 #ifdef _WIN32
+        dxFactory.reset();
         CoUninitialize();
+#endif
+#ifdef __APPLE__
+        cocoaFactory.reset();
 #endif
     }
 
@@ -1670,7 +1682,6 @@ TEST_F(DrawingTest, BlurTextShadow)
     auto bigRT = factory.createCpuRenderTarget({kW, kH}, kRenderFlags);
     bigRT.beginDraw();
     bigRT.clear(Colors::White);
-    Graphics gRT(AccessPtr::get(bigRT)); // cachedBlur::draw requires Graphics&
 
     auto tf = makeTextFormat(20.f);
 
@@ -1681,7 +1692,7 @@ TEST_F(DrawingTest, BlurTextShadow)
     // Draw shadow: blurred dark text offset down-right.
     cachedBlur shadow;
     shadow.tint = Color{0.f, 0.f, 0.f, 1.f}; // black
-    shadow.draw(gRT, bounds, [&](Graphics& mask) {
+    shadow.draw(bigRT, bounds, [&](Graphics& mask) {
         auto brush = mask.createSolidColorBrush(Colors::White);
         mask.drawTextU("Shadow", tf,
             {textRect.left + shadowOffX, textRect.top + shadowOffY,
@@ -1704,7 +1715,6 @@ TEST_F(DrawingTest, BlurTextGlow)
     auto bigRT = factory.createCpuRenderTarget({kW, kH}, kRenderFlags);
     bigRT.beginDraw();
     bigRT.clear(Colors::Black);
-    Graphics gRT(AccessPtr::get(bigRT));
 
     auto tf = makeTextFormat(20.f);
 
@@ -1714,7 +1724,7 @@ TEST_F(DrawingTest, BlurTextGlow)
     // Draw glow: blurred lime around the text (no offset).
     cachedBlur glow;
     glow.tint = Colors::Lime;
-    glow.draw(gRT, bounds, [&](Graphics& mask) {
+    glow.draw(bigRT, bounds, [&](Graphics& mask) {
         auto brush = mask.createSolidColorBrush(Colors::White);
         mask.drawTextU("Glow", tf, textRect, brush);
     });
@@ -1740,15 +1750,13 @@ TEST_F(DrawingTest, BlurNeumorphicBump)
 	{
         image_rt.beginDraw();
 
-        Graphics g_image(AccessPtr::get(image_rt));
-
 		const Rect bounds{ 0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH) };
 		constexpr float offset = 4.f;
 
 		// Dark shadow (bottom-right): draw shape shifted up-left so blur spills down-right.
 		cachedBlur darkShadow;
 		darkShadow.tint = Color{ 0.f, 0.f, 0.f, 0.5f }; // semi-transparent black
-		darkShadow.draw(g_image, bounds, [&](Graphics& mask) {
+		darkShadow.draw(image_rt, bounds, [&](Graphics& mask) {
 			auto brush = mask.createSolidColorBrush(Colors::White);
 			RoundedRect shifted = shape;
 			shifted.rect = offsetRect(shifted.rect, Size{ -offset, -offset });
@@ -1758,7 +1766,7 @@ TEST_F(DrawingTest, BlurNeumorphicBump)
 		// Light shadow (top-left): draw shape shifted down-right so blur spills up-left.
 		cachedBlur lightShadow;
 		lightShadow.tint = Color{ 1.f, 1.f, 1.f, 0.7f }; // semi-transparent white
-		lightShadow.draw(g_image, bounds, [&](Graphics& mask) {
+		lightShadow.draw(image_rt, bounds, [&](Graphics& mask) {
 			auto brush = mask.createSolidColorBrush(Colors::White);
 			RoundedRect shifted = shape;
 			shifted.rect = offsetRect(shifted.rect, Size{ offset, offset });
@@ -1833,8 +1841,6 @@ TEST_F(DrawingTest, BlurNeumorphicDip)
     auto bigRT = factory.createCpuRenderTarget({ kW, kH }, kRenderFlags);
     bigRT.beginDraw();
     {
-        Graphics gRT(AccessPtr::get(bigRT));
-
         const Color bgColor = colorFromHex(0xE0E0E0u);
         bigRT.clear(bgColor);
 
@@ -1842,10 +1848,9 @@ TEST_F(DrawingTest, BlurNeumorphicDip)
         const Rect bounds{ 0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH) };
         constexpr float offset = 4.f;
 
-
         // step one a rounded rect hole geometry for the inner shadows: a large rectangle with a rounded-rect hole.
         auto makeHoleGeometry = [&](float dx, float dy) {
-            auto geom = gRT.getFactory().createPathGeometry();
+            auto geom = bigRT.getFactory().createPathGeometry();
             auto sink = geom.open();
             sink.setFillMode(FillMode::Alternate);
             sink.addRect({ 0, 0, static_cast<float>(kW), static_cast<float>(kH) }, FigureBegin::Filled);
@@ -1860,7 +1865,7 @@ TEST_F(DrawingTest, BlurNeumorphicDip)
         auto darkGeom = makeHoleGeometry(offset, offset);
         cachedBlur innerDark;
         innerDark.tint = Color{ 0.f, 0.f, 0.f, 0.5f };
-        innerDark.draw(gRT, bounds, [&](Graphics& mask) {
+        innerDark.draw(bigRT, bounds, [&](Graphics& mask) {
             auto brush = mask.createSolidColorBrush(Colors::White);
             mask.fillGeometry(darkGeom, brush);
             });
@@ -1870,14 +1875,14 @@ TEST_F(DrawingTest, BlurNeumorphicDip)
         auto lightGeom = makeHoleGeometry(-offset, -offset);
         cachedBlur innerLight;
         innerLight.tint = Color{ 1.f, 1.f, 1.f, 0.8f };
-        innerLight.draw(gRT, bounds, [&](Graphics& mask) {
+        innerLight.draw(bigRT, bounds, [&](Graphics& mask) {
             auto brush = mask.createSolidColorBrush(Colors::White);
             mask.fillGeometry(lightGeom, brush);
             });
 
         // mask off everything outside the dip;
         auto maskGeom = makeHoleGeometry(0, 0);
-        gRT.fillGeometry(maskGeom, gRT.createSolidColorBrush(bgColor));
+        bigRT.fillGeometry(maskGeom, bigRT.createSolidColorBrush(bgColor));
     }
     bigRT.endDraw();
 
@@ -1887,8 +1892,8 @@ TEST_F(DrawingTest, BlurNeumorphicDip)
 TEST_F(DrawingTest, BlurNeumorphicDip)
 {
     constexpr uint32_t kW = 128, kH = 128;
-    // EightBitPixels + CpuReadable for the offscreen targets we'll lock.
-    constexpr int32_t kEightBit = (int32_t)BitmapRenderTargetFlags::EightBitPixels
+    // Mask + CpuReadable for the offscreen targets we'll lock.
+    constexpr int32_t kMask = (int32_t)BitmapRenderTargetFlags::Mask
                                 | (int32_t)BitmapRenderTargetFlags::CpuReadable;
 
     auto factory = g.getFactory();
@@ -1914,8 +1919,6 @@ TEST_F(DrawingTest, BlurNeumorphicDip)
 
 
     {
-        Graphics gRT(AccessPtr::get(bigRT));
-
         const Color bgColor = colorFromHex(0xE0E0E0u);
         bigRT.clear(bgColor);
 
@@ -1944,11 +1947,9 @@ TEST_F(DrawingTest, BlurNeumorphicDip)
         shadowRT.beginDraw();
         shadowRT.clear(Color{0.f, 0.f, 0.f, 0.f}); // transparent
         {
-            Graphics gShadow(AccessPtr::get(shadowRT));
-
             cachedBlur innerDark;
             innerDark.tint = Color{ 0.f, 0.f, 0.f, 0.5f };
-            innerDark.draw(gShadow, bounds, [&](Graphics& m) {
+            innerDark.draw(shadowRT, bounds, [&](Graphics& m) {
                 auto darkGeom = makeHoleGeom(m, offset, offset);
                 auto brush = m.createSolidColorBrush(Colors::White);
                 m.fillGeometry(darkGeom, brush);
@@ -1956,7 +1957,7 @@ TEST_F(DrawingTest, BlurNeumorphicDip)
 
             cachedBlur innerLight;
             innerLight.tint = Color{ 1.f, 1.f, 1.f, 0.8f };
-            innerLight.draw(gShadow, bounds, [&](Graphics& m) {
+            innerLight.draw(shadowRT, bounds, [&](Graphics& m) {
                 auto lightGeom = makeHoleGeom(m, -offset, -offset);
                 auto brush = m.createSolidColorBrush(Colors::White);
                 m.fillGeometry(lightGeom, brush);
@@ -1965,8 +1966,8 @@ TEST_F(DrawingTest, BlurNeumorphicDip)
         shadowRT.endDraw();
 
         // --- 2. Render shape mask: white inside rounded rect, black outside ---
-        // EightBitPixels → 8bpp alpha-only (1 byte per pixel).
-        auto maskRT = factory.createCpuRenderTarget({kW, kH}, kEightBit);
+        // Mask → 8bpp alpha-only (1 byte per pixel).
+        auto maskRT = factory.createCpuRenderTarget({kW, kH}, kMask);
         maskRT.beginDraw();
         maskRT.clear(Color{0.f, 0.f, 0.f, 0.f});
         {
@@ -1998,13 +1999,13 @@ TEST_F(DrawingTest, BlurNeumorphicDip)
 // then verify pixel format and spot-check pixel values.
 TEST_F(DrawingTest, EightBitBitmapToOutput)
 {
-    constexpr int32_t kEightBit = (int32_t)BitmapRenderTargetFlags::EightBitPixels
+    constexpr int32_t kMask = (int32_t)BitmapRenderTargetFlags::Mask
                                 | (int32_t)BitmapRenderTargetFlags::CpuReadable;
 
     auto factory = g.getFactory();
 
     // Create an 8-bit offscreen render target and draw a filled circle.
-    auto offscreen = factory.createCpuRenderTarget({kWidth, kHeight}, kEightBit);
+    auto offscreen = factory.createCpuRenderTarget({kWidth, kHeight}, kMask);
     offscreen.beginDraw();
     offscreen.clear(Color{0.f, 0.f, 0.f, 0.f});
     auto brush = offscreen.createSolidColorBrush(Colors::White);
@@ -2045,14 +2046,14 @@ TEST_F(DrawingTest, EightBitBitmapToOutput)
 // apply the mask to the image, then draw the result over a checkerboard.
 TEST_F(DrawingTest, EightBitMaskBitmapToOutput)
 {
-    constexpr int32_t kEightBit = (int32_t)BitmapRenderTargetFlags::EightBitPixels
+    constexpr int32_t kMask = (int32_t)BitmapRenderTargetFlags::Mask
                                 | (int32_t)BitmapRenderTargetFlags::CpuReadable;
     constexpr int32_t kColorCpu = (int32_t)BitmapRenderTargetFlags::CpuReadable;
 
     auto factory = g.getFactory();
 
     // 1. Mono mask: circle (white=opaque) on transparent background.
-    auto maskRT = factory.createCpuRenderTarget({kWidth, kHeight}, kEightBit);
+    auto maskRT = factory.createCpuRenderTarget({kWidth, kHeight}, kMask);
     maskRT.beginDraw();
     maskRT.clear(Color{0.f, 0.f, 0.f, 0.f});
     auto maskBrush = maskRT.createSolidColorBrush(Colors::White);
@@ -2090,13 +2091,102 @@ TEST_F(DrawingTest, EightBitMaskBitmapToOutput)
     EXPECT_TRUE(checkResult("eightBitMaskBitmapToOutput", 0, 4.0));
 }
 
+// Create an sRGB (32bpp PBGRA) offscreen render target, draw on it,
+// then verify pixel format and spot-check pixel values.
+TEST_F(DrawingTest, SRGBBitmapPixelFormat)
+{
+    constexpr int32_t kSRGB = (int32_t)BitmapRenderTargetFlags::SRGBPixels
+                            | (int32_t)BitmapRenderTargetFlags::CpuReadable;
+
+    auto factory = g.getFactory();
+
+    // Draw a filled rectangle on an sRGB offscreen target.
+    auto offscreen = factory.createCpuRenderTarget({kWidth, kHeight}, kSRGB);
+    offscreen.beginDraw();
+    offscreen.clear(Color{0.f, 0.f, 0.f, 0.f}); // transparent
+    auto brush = offscreen.createSolidColorBrush(Colors::Red);
+    offscreen.fillRectangle({8.f, 8.f, 56.f, 56.f}, brush);
+    offscreen.endDraw();
+
+    // Lock pixels and verify 32bpp format.
+    auto bmp = offscreen.getBitmap();
+    auto pixels = bmp.lockPixels(BitmapLockFlags::Read);
+    ASSERT_TRUE(pixels);
+
+    const uint8_t* data = pixels.getAddress();
+    const int32_t  bpr  = pixels.getBytesPerRow();
+    const auto     size = bmp.getSize();
+
+    // Verify 32bpp: 4 bytes per pixel → bytesPerRow == width * 4.
+    EXPECT_EQ(bpr, static_cast<int32_t>(size.width) * 4)
+        << "Expected 4 bytes per pixel (32bpp PBGRA), got " << bpr
+        << " bytes per row for " << size.width << " pixels wide";
+
+    // Centre of red rectangle (32,32) — PBGRA: B=0, G=0, R=255, A=255.
+    const uint8_t* centre = data + 32 * bpr + 32 * 4;
+    EXPECT_EQ(centre[0], 0x00) << "B channel should be 0";
+    EXPECT_EQ(centre[1], 0x00) << "G channel should be 0";
+    EXPECT_EQ(centre[2], 0xFF) << "R channel should be 255";
+    EXPECT_EQ(centre[3], 0xFF) << "A channel should be 255";
+
+    // Corner (0,0) — outside the rectangle, should be fully transparent.
+    const uint8_t* corner = data;
+    EXPECT_EQ(corner[0], 0x00) << "B should be 0 (transparent)";
+    EXPECT_EQ(corner[1], 0x00) << "G should be 0 (transparent)";
+    EXPECT_EQ(corner[2], 0x00) << "R should be 0 (transparent)";
+    EXPECT_EQ(corner[3], 0x00) << "A should be 0 (transparent)";
+}
+
+// Create an sRGB (32bpp) offscreen render target, draw coloured shapes,
+// then composite it onto the main output over a checkerboard.
+TEST_F(DrawingTest, SRGBBitmapToOutput)
+{
+    constexpr int32_t kSRGB = (int32_t)BitmapRenderTargetFlags::SRGBPixels
+                            | (int32_t)BitmapRenderTargetFlags::CpuReadable;
+
+    auto factory = g.getFactory();
+
+    // Draw a red circle and a blue rectangle on an sRGB offscreen target.
+    auto offscreen = factory.createCpuRenderTarget({kWidth, kHeight}, kSRGB);
+    offscreen.beginDraw();
+    offscreen.clear(Color{0.f, 0.f, 0.f, 0.f}); // transparent
+
+    auto redBrush = offscreen.createSolidColorBrush(Colors::Red);
+    offscreen.fillEllipse(gmpi::drawing::Ellipse{{32.f, 32.f}, 24.f, 24.f}, redBrush);
+
+    auto blueBrush = offscreen.createSolidColorBrush(Color{0.f, 0.f, 1.f, 0.5f}); // semi-transparent blue
+    offscreen.fillRectangle({16.f, 16.f, 48.f, 48.f}, blueBrush);
+
+    offscreen.endDraw();
+
+    // Cream/blue checkerboard background to expose alpha blending.
+    {
+        const Color bgCream = colorFromHex(0xF6E7D7u);
+        const Color bgBlue  = colorFromHex(0xD9EAF8u);
+        constexpr float tile = 16.f;
+
+        g.clear(bgCream);
+        auto checkerBrush = g.createSolidColorBrush(bgBlue);
+        for (float y = 0.f; y < static_cast<float>(kHeight); y += tile)
+            for (float x = ((static_cast<int>(y / tile)) & 1) ? tile : 0.f; x < static_cast<float>(kWidth); x += tile * 2.f)
+                g.fillRectangle({x, y, x + tile, y + tile}, checkerBrush);
+    }
+
+    // Composite the sRGB bitmap onto the output.
+    auto resultBmp = offscreen.getBitmap();
+    g.drawBitmap(resultBmp, {0.f, 0.f, 64.f, 64.f}, {0.f, 0.f, 64.f, 64.f},
+                 1.0f, BitmapInterpolationMode::NearestNeighbor);
+
+    EXPECT_TRUE(checkResult("srgbBitmapToOutput", 0, 4.0));
+}
+
 // Neumorphic "dip" over a checkerboard background.
 // Inner shadows are rendered to a transparent image, masked to the shape,
 // then composited over the checkerboard so the background shows through.
 TEST_F(DrawingTest, BlurNeumorphicDipCheckerboard)
 {
     constexpr uint32_t kW = 128, kH = 128;
-    constexpr int32_t kEightBit = (int32_t)BitmapRenderTargetFlags::EightBitPixels
+    constexpr int32_t kMask = (int32_t)BitmapRenderTargetFlags::Mask
                                 | (int32_t)BitmapRenderTargetFlags::CpuReadable;
     constexpr int32_t kColorCpu = (int32_t)BitmapRenderTargetFlags::CpuReadable;
 
@@ -2124,11 +2214,9 @@ TEST_F(DrawingTest, BlurNeumorphicDipCheckerboard)
     shadowRT.beginDraw();
     shadowRT.clear(Color{0.f, 0.f, 0.f, 0.f});
     {
-        Graphics gShadow(AccessPtr::get(shadowRT));
-
         cachedBlur innerDark;
         innerDark.tint = Color{0.f, 0.f, 0.f, 0.5f};
-        innerDark.draw(gShadow, bounds, [&](Graphics& m) {
+        innerDark.draw(shadowRT, bounds, [&](Graphics& m) {
             auto darkGeom = makeHoleGeom(m, offset, offset);
             auto brush = m.createSolidColorBrush(Colors::White);
             m.fillGeometry(darkGeom, brush);
@@ -2136,7 +2224,7 @@ TEST_F(DrawingTest, BlurNeumorphicDipCheckerboard)
 
         cachedBlur innerLight;
         innerLight.tint = Color{1.f, 1.f, 1.f, 0.8f};
-        innerLight.draw(gShadow, bounds, [&](Graphics& m) {
+        innerLight.draw(shadowRT, bounds, [&](Graphics& m) {
             auto lightGeom = makeHoleGeom(m, -offset, -offset);
             auto brush = m.createSolidColorBrush(Colors::White);
             m.fillGeometry(lightGeom, brush);
@@ -2145,7 +2233,7 @@ TEST_F(DrawingTest, BlurNeumorphicDipCheckerboard)
     shadowRT.endDraw();
 
     // --- 2. Render shape mask: 8bpp mono, white inside rounded rect ---
-    auto maskRT = factory.createCpuRenderTarget({kW, kH}, kEightBit);
+    auto maskRT = factory.createCpuRenderTarget({kW, kH}, kMask);
     maskRT.beginDraw();
     maskRT.clear(Color{0.f, 0.f, 0.f, 0.f});
     {
@@ -2187,7 +2275,7 @@ TEST_F(DrawingTest, BlurNeumorphicDipCheckerboard)
 TEST_F(DrawingTest, BlurNeumorphicBumpCheckerboard)
 {
     constexpr uint32_t kW = 128, kH = 128;
-    constexpr int32_t kEightBit = (int32_t)BitmapRenderTargetFlags::EightBitPixels
+    constexpr int32_t kMask = (int32_t)BitmapRenderTargetFlags::Mask
                                 | (int32_t)BitmapRenderTargetFlags::CpuReadable;
     constexpr int32_t kColorCpu = (int32_t)BitmapRenderTargetFlags::CpuReadable;
 
@@ -2202,12 +2290,10 @@ TEST_F(DrawingTest, BlurNeumorphicBumpCheckerboard)
     shadowRT.beginDraw();
     shadowRT.clear(Color{0.f, 0.f, 0.f, 0.f});
     {
-        Graphics gShadow(AccessPtr::get(shadowRT));
-
         // Light shadow (top-left): shape shifted down-right so blur spills up-left.
         cachedBlur lightShadow;
         lightShadow.tint = Color{1.f, 1.f, 1.f, 0.7f};
-        lightShadow.draw(gShadow, bounds, [&](Graphics& m) {
+        lightShadow.draw(shadowRT, bounds, [&](Graphics& m) {
             auto brush = m.createSolidColorBrush(Colors::White);
             RoundedRect shifted = shape;
             shifted.rect = offsetRect(shifted.rect, Size{-offset, -offset});
@@ -2217,7 +2303,7 @@ TEST_F(DrawingTest, BlurNeumorphicBumpCheckerboard)
         // Dark shadow (bottom-right): shape shifted up-left so blur spills down-right.
         cachedBlur darkShadow;
         darkShadow.tint = Color{0.f, 0.f, 0.f, 0.5f};
-        darkShadow.draw(gShadow, bounds, [&](Graphics& m) {
+        darkShadow.draw(shadowRT, bounds, [&](Graphics& m) {
             auto brush = m.createSolidColorBrush(Colors::White);
             RoundedRect shifted = shape;
             shifted.rect = offsetRect(shifted.rect, Size{offset, offset});
@@ -2230,7 +2316,7 @@ TEST_F(DrawingTest, BlurNeumorphicBumpCheckerboard)
     // Clear to transparent, then fill a hole geometry (full rect minus rounded rect)
     // so only the exterior is opaque. D2D source-over can't erase pixels, so we
     // draw the exterior shape rather than trying to punch a hole.
-    auto maskRT = factory.createCpuRenderTarget({kW, kH}, kEightBit);
+    auto maskRT = factory.createCpuRenderTarget({kW, kH}, kMask);
     maskRT.beginDraw();
     maskRT.clear(Color{0.f, 0.f, 0.f, 0.f}); // transparent everywhere
     {
