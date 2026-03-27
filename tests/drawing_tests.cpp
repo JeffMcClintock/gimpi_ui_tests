@@ -43,205 +43,12 @@
 #include "Drawing.h"
 #include "helpers/BitmapMask.h"
 #include "helpers/CachedBlur.h"
+#include "helpers/SavePng.h"
 
 using namespace gmpi::drawing;
 using namespace gmpi::drawing::Colors;
 
-// ============================================================
-// savePng  –  save a GMPI Bitmap to a PNG file
-// ============================================================
-// The bitmap must have been created with the SRGBPixels flag so its
-// locked pixels are 32bpp (PBGRA on Windows, RGBA on macOS).
-
-// Linear float [0,1] → sRGB uint8_t [0,255].
-static uint8_t linearToSRGB_f(float c)
-{
-    c = std::clamp(c, 0.0f, 1.0f);
-    float s = (c <= 0.0031308f)
-        ? c * 12.92f
-        : 1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f;
-    return static_cast<uint8_t>(std::clamp(s * 255.0f + 0.5f, 0.0f, 255.0f));
-}
-
 #ifdef _WIN32
-// Linear uint8_t [0,255] → sRGB uint8_t [0,255].
-static uint8_t linearToSRGB(uint8_t v)
-{
-    return linearToSRGB_f(v / 255.0f);
-}
-
-// float → IEEE 754 half-precision.
-static uint16_t floatToHalf(float f)
-{
-    uint32_t bits; std::memcpy(&bits, &f, 4);
-    uint16_t sign = static_cast<uint16_t>((bits >> 16) & 0x8000u);
-    int32_t  exp  = static_cast<int32_t>((bits >> 23) & 0xffu) - 127 + 15;
-    uint32_t mant = bits & 0x7fffffu;
-    if ((bits & 0x7fffffffu) > 0x7f800000u) return sign | 0x7e00u; // NaN
-    if (exp >= 31) return sign | 0x7c00u;                           // Inf / overflow
-    if (exp <= 0) {
-        if (exp < -10) return sign;                                 // underflow → ±0
-        mant |= 0x800000u;
-        int shift = 14 - exp;
-        return sign | static_cast<uint16_t>((mant + (1u << (shift - 1))) >> shift);
-    }
-    return sign | static_cast<uint16_t>((static_cast<uint32_t>(exp) << 10) | (mant >> 13));
-}
-
-// IEEE 754 half-precision float → float.
-static float halfToFloat(uint16_t h)
-{
-    const uint32_t sign = (h >> 15) & 0x1u;
-    const uint32_t exp  = (h >> 10) & 0x1fu;
-    const uint32_t mant = h & 0x3ffu;
-    uint32_t bits;
-    if (exp == 0)
-    {
-        if (mant == 0) { bits = sign << 31; }
-        else
-        {
-            // Subnormal: normalise
-            uint32_t e = 0, m = mant;
-            while (!(m & 0x400u)) { m <<= 1; ++e; }
-            bits = (sign << 31) | ((127 - 15 - e + 1) << 23) | ((m & 0x3ffu) << 13);
-        }
-    }
-    else if (exp == 31)
-    {
-        bits = (sign << 31) | 0x7f800000u | (mant << 13); // Inf / NaN
-    }
-    else
-    {
-        bits = (sign << 31) | ((exp + (127 - 15)) << 23) | (mant << 13);
-    }
-    float f; std::memcpy(&f, &bits, 4); return f;
-}
-
-// Windows implementation using WIC.
-// Handles both render-target pixel formats:
-//   64bppPRGBAHalf (8 bytes/pixel) — float-precision linear premultiplied RGBA
-//   32bppPBGRA     (4 bytes/pixel) — 8-bit linear premultiplied BGRA
-// Output is always a 32bpp sRGB BGRA PNG.
-static bool savePng(const std::filesystem::path& path, gmpi::drawing::Bitmap& bitmap)
-{
-    std::filesystem::create_directories(path.parent_path());
-
-    auto pixels = bitmap.lockPixels(BitmapLockFlags::Read);
-    if (!pixels)
-        return false;
-
-    const uint8_t* srcData = pixels.getAddress();
-    const int32_t  srcBpr  = pixels.getBytesPerRow();
-    const SizeU    size    = bitmap.getSize();
-    const int32_t  srcBpp  = srcBpr / static_cast<int32_t>(size.width); // 4 or 8
-
-    // Output is always 32bpp BGRA sRGB.
-    const int32_t outBpr = static_cast<int32_t>(size.width) * 4;
-    std::vector<uint8_t> srgbData(static_cast<size_t>(outBpr) * size.height);
-
-    for (uint32_t y = 0; y < size.height; ++y)
-    {
-        const uint8_t* src = srcData + y * srcBpr;
-        uint8_t*       dst = srgbData.data() + y * outBpr;
-
-        for (uint32_t x = 0; x < size.width; ++x)
-        {
-            uint8_t r, g, b, a;
-
-            if (srcBpp == 8)
-            {
-                // 64bppPRGBAHalf: linear premultiplied RGBA half-float.
-                const uint16_t* h = reinterpret_cast<const uint16_t*>(src);
-                float fr = halfToFloat(h[0]);
-                float fg = halfToFloat(h[1]);
-                float fb = halfToFloat(h[2]);
-                float fa = halfToFloat(h[3]);
-
-                a = static_cast<uint8_t>(std::clamp(fa * 255.0f + 0.5f, 0.0f, 255.0f));
-                if (fa > 0.0f)
-                {
-                    fr = std::clamp(fr / fa, 0.0f, 1.0f);
-                    fg = std::clamp(fg / fa, 0.0f, 1.0f);
-                    fb = std::clamp(fb / fa, 0.0f, 1.0f);
-                }
-                else { fr = fg = fb = 0.0f; }
-
-                r = linearToSRGB_f(fr);
-                g = linearToSRGB_f(fg);
-                b = linearToSRGB_f(fb);
-            }
-            else
-            {
-                // 32bppPBGRA: linear premultiplied BGRA 8-bit.
-                a = src[3];
-                if (a == 0)
-                {
-                    dst[0] = dst[1] = dst[2] = dst[3] = 0;
-                    src += 4; dst += 4;
-                    continue;
-                }
-                float fa = a / 255.0f;
-                b = linearToSRGB(static_cast<uint8_t>(std::clamp(src[0] / fa + 0.5f, 0.0f, 255.0f)));
-                g = linearToSRGB(static_cast<uint8_t>(std::clamp(src[1] / fa + 0.5f, 0.0f, 255.0f)));
-                r = linearToSRGB(static_cast<uint8_t>(std::clamp(src[2] / fa + 0.5f, 0.0f, 255.0f)));
-            }
-
-            // Store sRGB BGRA, re-premultiplied.
-            if (a == 255)
-            {
-                dst[0] = b; dst[1] = g; dst[2] = r; dst[3] = 255;
-            }
-            else
-            {
-                float fa = a / 255.0f;
-                dst[0] = static_cast<uint8_t>(b * fa + 0.5f);
-                dst[1] = static_cast<uint8_t>(g * fa + 0.5f);
-                dst[2] = static_cast<uint8_t>(r * fa + 0.5f);
-                dst[3] = a;
-            }
-            src += srcBpp;
-            dst += 4;
-        }
-    }
-
-    // Encode to PNG via WIC.
-    IWICImagingFactory* rawWic{};
-    CoCreateInstance(
-        CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
-        __uuidof(IWICImagingFactory), reinterpret_cast<void**>(&rawWic));
-    gmpi::directx::ComPtr<IWICImagingFactory> wic(rawWic);
-    if (!wic) return false;
-
-    IWICStream* rawStream{};
-    wic->CreateStream(&rawStream);
-    gmpi::directx::ComPtr<IWICStream> stream(rawStream);
-    if (!stream) return false;
-    stream->InitializeFromFilename(path.wstring().c_str(), GENERIC_WRITE);
-
-    IWICBitmapEncoder* rawEncoder{};
-    wic->CreateEncoder(GUID_ContainerFormatPng, nullptr, &rawEncoder);
-    gmpi::directx::ComPtr<IWICBitmapEncoder> encoder(rawEncoder);
-    if (!encoder) return false;
-    encoder->Initialize(stream, WICBitmapEncoderNoCache);
-
-    IWICBitmapFrameEncode* rawFrame{};
-    IPropertyBag2* props{};
-    encoder->CreateNewFrame(&rawFrame, &props);
-    gmpi::directx::ComPtr<IWICBitmapFrameEncode> frame(rawFrame);
-    if (props) props->Release();
-    if (!frame) return false;
-
-    frame->Initialize(nullptr);
-    frame->SetSize(size.width, size.height);
-    WICPixelFormatGUID fmt = GUID_WICPixelFormat32bppPBGRA;
-    frame->SetPixelFormat(&fmt);
-    frame->WritePixels(size.height, outBpr, static_cast<UINT>(srgbData.size()), srgbData.data());
-    frame->Commit();
-    encoder->Commit();
-
-    return true;
-}
-
 // Creates a 128x20 sRGB gradient PNG where column x has grey value x (0..127).
 // Only writes the file if it does not already exist.
 static bool createSRGBGradientPng(const std::filesystem::path& path)
@@ -302,84 +109,6 @@ static bool createSRGBGradientPng(const std::filesystem::path& path)
 }
 #endif // _WIN32
 
-#ifdef __APPLE__
-// macOS implementation using CoreGraphics / ImageIO
-static bool savePng(const std::filesystem::path& path, gmpi::drawing::Bitmap& bitmap)
-{
-    std::filesystem::create_directories(path.parent_path());
-
-    auto pixels = bitmap.lockPixels(BitmapLockFlags::Read);
-    if (!pixels)
-        return false;
-
-    uint8_t* data    = pixels.getAddress();
-    int32_t  bpr     = pixels.getBytesPerRow();
-    SizeU    size    = bitmap.getSize();
-    int32_t  bpp     = bpr / static_cast<int32_t>(size.width);
-
-    // If float-linear (128bpp), convert to 8-bit sRGB RGBA for PNG output.
-    std::vector<uint8_t> srgbBuf;
-    int32_t srgbBpr = bpr;
-    uint8_t* pngData = data;
-
-    if (bpp == 16)
-    {
-        srgbBpr = static_cast<int32_t>(size.width) * 4;
-        srgbBuf.resize(srgbBpr * size.height);
-        for (uint32_t y = 0; y < size.height; ++y)
-        {
-            for (uint32_t x = 0; x < size.width; ++x)
-            {
-                const float* f = reinterpret_cast<const float*>(data + y * bpr + x * 16);
-                float fr = f[0], fg = f[1], fb = f[2], fa = f[3];
-                uint8_t a = static_cast<uint8_t>(std::clamp(fa * 255.0f + 0.5f, 0.0f, 255.0f));
-                if (fa > 0.0f)
-                {
-                    fr = std::clamp(fr / fa, 0.0f, 1.0f);
-                    fg = std::clamp(fg / fa, 0.0f, 1.0f);
-                    fb = std::clamp(fb / fa, 0.0f, 1.0f);
-                }
-                else { fr = fg = fb = 0.0f; }
-
-                uint8_t* dst = srgbBuf.data() + y * srgbBpr + x * 4;
-                // Re-premultiply in sRGB for PNG.
-                float aNorm = a / 255.0f;
-                dst[0] = static_cast<uint8_t>(linearToSRGB_f(fr) * aNorm + 0.5f);
-                dst[1] = static_cast<uint8_t>(linearToSRGB_f(fg) * aNorm + 0.5f);
-                dst[2] = static_cast<uint8_t>(linearToSRGB_f(fb) * aNorm + 0.5f);
-                dst[3] = a;
-            }
-        }
-        pngData = srgbBuf.data();
-    }
-
-    CGColorSpaceRef colorSpace = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
-    CGContextRef ctx = CGBitmapContextCreate(
-        pngData, size.width, size.height, 8, srgbBpr,
-        colorSpace,
-        kCGImageAlphaPremultipliedLast); // RGBA premultiplied
-    CGColorSpaceRelease(colorSpace);
-    if (!ctx) return false;
-
-    CGImageRef image = CGBitmapContextCreateImage(ctx);
-    CGContextRelease(ctx);
-    if (!image) return false;
-
-    CFStringRef cfPath = CFStringCreateWithCString(kCFAllocatorDefault, path.c_str(), kCFStringEncodingUTF8);
-    CFURLRef url = CFURLCreateWithFileSystemPath(kCFAllocatorDefault, cfPath, kCFURLPOSIXPathStyle, false);
-    CFRelease(cfPath);
-    CGImageDestinationRef dest = CGImageDestinationCreateWithURL(url, CFSTR("public.png"), 1, nullptr);
-    CFRelease(url);
-    if (!dest) { CGImageRelease(image); return false; }
-
-    CGImageDestinationAddImage(dest, image, nullptr);
-    bool ok = CGImageDestinationFinalize(dest);
-    CFRelease(dest);
-    CGImageRelease(image);
-
-    return ok;
-}
-#endif // __APPLE__
 
 // ============================================================
 // DrawingTest fixture
@@ -570,9 +299,9 @@ protected:
                     }
                     else { fr = fg = fb = 0.0f; }
 
-                    rendered[0] = linearToSRGB_f(fb); // B
-                    rendered[1] = linearToSRGB_f(fg); // G
-                    rendered[2] = linearToSRGB_f(fr); // R
+                    rendered[0] = detail::linearToSRGB_f(fb); // B
+                    rendered[1] = detail::linearToSRGB_f(fg); // G
+                    rendered[2] = detail::linearToSRGB_f(fr); // R
                     rendered[3] = a;
                 }
                 else
@@ -587,9 +316,9 @@ protected:
                     else
                     {
                         float fa = a / 255.0f;
-                        rendered[2] = linearToSRGB(static_cast<uint8_t>(std::clamp(p[2] / fa + 0.5f, 0.0f, 255.0f)));
-                        rendered[1] = linearToSRGB(static_cast<uint8_t>(std::clamp(p[1] / fa + 0.5f, 0.0f, 255.0f)));
-                        rendered[0] = linearToSRGB(static_cast<uint8_t>(std::clamp(p[0] / fa + 0.5f, 0.0f, 255.0f)));
+                        rendered[2] = detail::linearToSRGB(static_cast<uint8_t>(std::clamp(p[2] / fa + 0.5f, 0.0f, 255.0f)));
+                        rendered[1] = detail::linearToSRGB(static_cast<uint8_t>(std::clamp(p[1] / fa + 0.5f, 0.0f, 255.0f)));
+                        rendered[0] = detail::linearToSRGB(static_cast<uint8_t>(std::clamp(p[0] / fa + 0.5f, 0.0f, 255.0f)));
                         rendered[3] = a;
                     }
                 }
@@ -613,9 +342,9 @@ protected:
                     }
                     else { fr = fg = fb = 0.0f; }
 
-                    rendered[0] = linearToSRGB_f(fr); // R
-                    rendered[1] = linearToSRGB_f(fg); // G
-                    rendered[2] = linearToSRGB_f(fb); // B
+                    rendered[0] = detail::linearToSRGB_f(fr); // R
+                    rendered[1] = detail::linearToSRGB_f(fg); // G
+                    rendered[2] = detail::linearToSRGB_f(fb); // B
                     rendered[3] = a;
                 }
                 else
