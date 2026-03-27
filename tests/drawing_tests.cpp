@@ -2430,119 +2430,78 @@ TEST_F(DrawingTest, BlurNeumorphicBumpCheckerboard)
     EXPECT_TRUE(checkBitmap("blurNeumorphicBumpCheckerboard", bigRT, 2, 4.0));
 }
 
-// Additive pixel blending: draw coloured "lights" at hex-grid positions.
-// Each light is a premultiplied bitmap with alpha=0, so it adds colour to
-// the background without occluding it.  Extra-dense lights near the centre
-// demonstrate additive colour mixing (R+G=Y, R+B=M, G+B=C, R+G+B=W).
-TEST_F(DrawingTest, AdditivePixels)
+TEST_F(DrawingTest, AdditiveBitmap)
 {
     constexpr uint32_t kW = 128, kH = 128;
-    constexpr int32_t kColorCpu = (int32_t)BitmapRenderTargetFlags::CpuReadable;
+    constexpr uint32_t kBmpSize = 48; // size of the sprite
 
     auto factory = g.getFactory();
 
-    // --- Light definitions ---
-    struct Light { float x, y, r, g, b; };
-    std::vector<Light> lights;
+    // 1. Create a CPU-writable bitmap (default = 64bppPRGBAHalf).
+    auto sprite = factory.createImage(kBmpSize, kBmpSize);
 
-    // Six saturated hues to cycle through on the hex grid.
-    constexpr float hues[][3] = {
-        {1.f, 0.f, 0.f},  // red
-        {1.f, 1.f, 0.f},  // yellow
-        {0.f, 1.f, 0.f},  // green
-        {0.f, 1.f, 1.f},  // cyan
-        {0.f, 0.f, 1.f},  // blue
-        {1.f, 0.f, 1.f},  // magenta
-    };
-    constexpr int nHues = 6;
-
-    // Hex grid covering the image.
-    constexpr float spacing = 24.f;
-    constexpr float vSpacing = spacing * 0.866025f; // sqrt(3)/2
-    const float cx = kW * 0.5f, cy = kH * 0.5f;
-    int hueIdx = 0;
-
-    for (int row = -3; row <= 3; ++row)
+    // 2. Lock pixels for write and fill with an additive radial gradient.
     {
-        float y = cy + row * vSpacing;
-        float xOff = (row & 1) ? spacing * 0.5f : 0.f;
-        for (int col = -3; col <= 3; ++col)
+        auto pixels = sprite.lockPixels(BitmapLockFlags::Write);
+        ASSERT_TRUE(pixels);
+
+        uint8_t*      data = const_cast<uint8_t*>(pixels.getAddress());
+        const int32_t bpr  = pixels.getBytesPerRow();
+        const float   cx   = kBmpSize * 0.5f;
+        const float   cy   = kBmpSize * 0.5f;
+        const float   rad  = kBmpSize * 0.5f;
+
+		constexpr float centerRadius = 4.f; // inner area of full brightness before radial falloff begins
+        constexpr float chan1 = 1.0f; // red
+        constexpr float chan2 = 0.8f; // green
+        constexpr float chan3 = 0.2f; // blue
+
+        constexpr float taperZoneStart = 0.5f; // linear taper at edge to hide squareness.
+        constexpr float taperGradient = 1.0f / (1.0f - taperZoneStart); // linear taper at edge to hide squareness.
+
+        for (uint32_t y = 0; y < kBmpSize; ++y)
         {
-            float x = cx + col * spacing + xOff;
-            if (x < -10.f || x > kW + 10.f || y < -10.f || y > kH + 10.f)
-                continue;
-
-            const auto& h = hues[hueIdx % nHues];
-            lights.push_back({x, y, h[0], h[1], h[2]});
-            ++hueIdx;
-        }
-    }
-
-    // Extra-dense cluster near the centre: small hex ring + centre light.
-    constexpr float innerSpacing = 10.f;
-    for (int i = 0; i < 6; ++i)
-    {
-        float angle = i * 3.14159265f / 3.f;
-        float x = cx + innerSpacing * std::cos(angle);
-        float y = cy + innerSpacing * std::sin(angle);
-        const auto& h = hues[i];
-        lights.push_back({x, y, h[0], h[1], h[2]});
-    }
-    // White centre light.
-    lights.push_back({cx, cy, 1.f, 1.f, 1.f});
-
-    // --- Build the additive light bitmap ---
-    // SRGBPixels → 32bpp PBGRA, so setPixel() writes ARGB packed uint32_t.
-    auto lightBmp = factory.createImage({kW, kH},
-        (int32_t)BitmapRenderTargetFlags::SRGBPixels);
-    {
-        auto pixels = lightBmp.lockPixels(BitmapLockFlags::Write);
-
-        constexpr float sigma = 10.f;
-        constexpr float invTwoSigma2 = 1.f / (2.f * sigma * sigma);
-
-        for (uint32_t py = 0; py < kH; ++py)
-        {
-            for (uint32_t px = 0; px < kW; ++px)
+            uint16_t* row = reinterpret_cast<uint16_t*>(data + y * bpr);
+            for (uint32_t x = 0; x < kBmpSize; ++x)
             {
-                // Accumulate additive contributions in linear RGB.
-                float linR = 0.f, linG = 0.f, linB = 0.f;
+                const float dx = (x + 0.5f) - cx;
+                const float dy = (y + 0.5f) - cy;
+                const float dist = std::sqrt(dx * dx + dy * dy);
+                float brightness = 1.0f / (std::max)(1.0f, 2.0f * (dist - centerRadius));
 
-                for (const auto& L : lights)
-                {
-                    float dx = px - L.x;
-                    float dy = py - L.y;
-                    float d2 = dx * dx + dy * dy;
-                    float brightness = std::exp(-d2 * invTwoSigma2) * 0.6f;
+                // taper bightness at the edges to hid the squareness of the image.
+				brightness *= (std::clamp)(1.f - (taperGradient * (dist - rad * taperZoneStart) / rad), 0.f, 1.f);
 
-                    linR += L.r * brightness;
-                    linG += L.g * brightness;
-                    linB += L.b * brightness;
-                }
-
-                // Premultiply in linear space, then convert to sRGB.
-                // Alpha = 0 makes this purely additive (SRC_OVER adds colour
-                // without reducing the background).
-                uint8_t sR = linearToSRGB_f(std::min(linR, 1.f));
-                uint8_t sG = linearToSRGB_f(std::min(linG, 1.f));
-                uint8_t sB = linearToSRGB_f(std::min(linB, 1.f));
-
-                uint32_t argb = (0u << 24) | (uint32_t(sR) << 16)
-                              | (uint32_t(sG) << 8) | uint32_t(sB);
-                pixels.setPixel(px, py, argb);
+                // Premultiply and write as RGBA half-float.
+                row[x * 4 + 0] = floatToHalf(chan1 * brightness);
+                row[x * 4 + 1] = floatToHalf(chan2 * brightness);
+                row[x * 4 + 2] = floatToHalf(chan3 * brightness);
+                row[x * 4 + 3] = floatToHalf(0.0f); // additive premultiplied colors have alpha at zero to retain full brightness of background pixel.
             }
         }
     }
 
-    // --- Dark background + composite ---
-    auto bigRT = factory.createCpuRenderTarget({kW, kH}, kColorCpu);
+    // 3. Draw onto a larger render target: dark background + 5 overlapping stamps.
+    auto bigRT = factory.createCpuRenderTarget({kW, kH}, kRenderFlags);
     bigRT.beginDraw();
-    bigRT.clear(Color{0.04f, 0.04f, 0.06f, 1.f}); // near-black
+    bigRT.clear(Color{0.05f, 0.05f, 0.1f, 1.0f}); // dark blue-grey
 
-    Rect full{0.f, 0.f, float(kW), float(kH)};
-    bigRT.drawBitmap(lightBmp, full, full);
+    const Rect srcRect{0.f, 0.f, float(kBmpSize), float(kBmpSize)};
+    struct Pos { float x, y; };
+    const Pos stamps[] = {
+        {10.f,  40.f},
+        {30.f,  20.f},
+        {40.f,  20.f},
+        {50.f,  64.f},
+        {70.f,  30.f},
+        {45.f,  65.f},
+    };
+    for (auto [sx, sy] : stamps)
+    {
+        const Rect dst{sx, sy, sx + float(kBmpSize), sy + float(kBmpSize)};
+        bigRT.drawBitmap(sprite, dst, srcRect);
+    }
 
     bigRT.endDraw();
-
-    EXPECT_TRUE(checkBitmap("additivePixels", bigRT, 2, 4.0));
+    EXPECT_TRUE(checkBitmap("AdditiveBitmap", bigRT, 2, 4.0));
 }
