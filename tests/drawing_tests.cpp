@@ -1429,102 +1429,11 @@ TEST_F(DrawingTest, BlurTextGlow)
     EXPECT_TRUE(checkBitmap("blurTextGlow", bigRT, 2));
 }
 
-#if 0
-
-// Neumorphic "bump" — raised rounded rectangle with light and dark shadows.
-TEST_F(DrawingTest, BlurNeumorphicBump)
-{
-    constexpr uint32_t kW = 128, kH = 128;
-	const RoundedRect shape{ {24.f, 24.f, 104.f, 104.f}, 16.f, 16.f };
-
-    auto factory = g.getFactory();
-	auto image_rt = factory.createCpuRenderTarget({ kW, kH }, (int)BitmapRenderTargetFlags::CpuReadable);
-	{
-        image_rt.beginDraw();
-
-		const gmpi::drawing::Rect bounds{ 0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH) };
-		constexpr float offset = 4.f;
-
-		// Dark shadow (bottom-right): draw shape shifted up-left so blur spills down-right.
-		cachedBlur darkShadow;
-		darkShadow.tint = Color{ 0.f, 0.f, 0.f, 0.5f }; // semi-transparent black
-		darkShadow.draw(image_rt, bounds, [&](Graphics& mask) {
-			auto brush = mask.createSolidColorBrush(Colors::White);
-			RoundedRect shifted = shape;
-			shifted.rect = offsetRect(shifted.rect, gmpi::drawing::Size{ -offset, -offset });
-			mask.fillRoundedRectangle(shifted, brush);
-			});
-
-		// Light shadow (top-left): draw shape shifted down-right so blur spills up-left.
-		cachedBlur lightShadow;
-		lightShadow.tint = Color{ 1.f, 1.f, 1.f, 0.7f }; // semi-transparent white
-		lightShadow.draw(image_rt, bounds, [&](Graphics& mask) {
-			auto brush = mask.createSolidColorBrush(Colors::White);
-			RoundedRect shifted = shape;
-			shifted.rect = offsetRect(shifted.rect, gmpi::drawing::Size{ offset, offset });
-			mask.fillRoundedRectangle(shifted, brush);
-			});
-	}
-
-    image_rt.endDraw();
-
-	auto alphaMask = factory.createCpuRenderTarget({ kW, kH }, (int)BitmapRenderTargetFlags::Mask | (int)BitmapRenderTargetFlags::CpuReadable);
-	{
-		alphaMask.beginDraw();
-		alphaMask.clear(Colors::Black); // solid
-		alphaMask.drawRoundedRectangle(shape, alphaMask.createSolidColorBrush(Colors::Black)); // where the hole is
-		alphaMask.endDraw();
-	}
-
-    auto mask = alphaMask.getBitmap();
-    auto image = image_rt.getBitmap();
-
-    applyMask(image, mask);
-    
-    auto g_output = factory.createCpuRenderTarget({ kW, kH }, kRenderFlags);
-    g_output.beginDraw();
-    {
-        //  Cream and light-blue checkerboard tiles to expose alpha blending.
-        {
-            const Color bgCream = colorFromHex(0xF6E7D7u);
-            const Color bgBlue = colorFromHex(0xD9EAF8u);
-            const float tile = 16.f;
-
-            g_output.clear(bgCream);
-            auto checkerBrush = g_output.createSolidColorBrush(bgBlue);
-            for(float y = 0.f; y < static_cast<float>(kH); y += tile)
-            {
-                for(float x = ((static_cast<int>(y / tile)) & 1) ? tile : 0.f; x < static_cast<float>(kW); x += tile * 2.f)
-                {
-                    g_output.fillRectangle({ x, y, x + tile, y + tile }, checkerBrush);
-                }
-            }
-        }
-
-        // draw the blurs over the top.
-        g_output.drawBitmap(
-              image
-            , {0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH)}
-            , {0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH)}
-            , 1.0f
-            , BitmapInterpolationMode::NearestNeighbor);
-    }
-
-    g_output.endDraw();
-
-    // Draw the actual raised surface on top.
-//    auto surfaceBrush = bigRT.createSolidColorBrush(bgCream);
-//    bigRT.fillRoundedRectangle(shape, surfaceBrush);
-
-    EXPECT_TRUE(checkBitmap("blurNeumorphicBump", g_output, 2));
-}
-#endif
 
 // Neumorphic "dip" — recessed rounded rectangle with inner shadows.
 // Shadows are rendered to an offscreen target, then a shape mask is applied
 // pixel-by-pixel so shadows are clipped to the interior without overpainting
 // the background — works correctly regardless of what the background contains.
-
 
 TEST_F(DrawingTest, BlurNeumorphicDip)
 {
