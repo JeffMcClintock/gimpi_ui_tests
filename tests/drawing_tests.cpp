@@ -184,10 +184,10 @@ protected:
                     // 64bppPRGBAHalf: linear premultiplied RGBA half-float.
                     const uint16_t* h = reinterpret_cast<const uint16_t*>(
                         ourAddr + y * ourBpr + x * 8);
-                    float fr = halfToFloat(h[0]);
-                    float fg = halfToFloat(h[1]);
-                    float fb = halfToFloat(h[2]);
-                    float fa = halfToFloat(h[3]);
+                    float fr = gmpi::drawing::detail::halfToFloat(h[0]);
+                    float fg = gmpi::drawing::detail::halfToFloat(h[1]);
+                    float fb = gmpi::drawing::detail::halfToFloat(h[2]);
+                    float fa = gmpi::drawing::detail::halfToFloat(h[3]);
 
                     uint8_t a = static_cast<uint8_t>(std::clamp(fa * 255.0f + 0.5f, 0.0f, 255.0f));
                     if (fa > 0.0f)
