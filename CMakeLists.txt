@@ -47,12 +47,14 @@ FetchContent_MakeAvailable(googletest)
 if(APPLE)
     add_executable(gmpi_ui_tests
         tests/drawing_tests.cpp
+        tests/text_tests.cpp
         tests/DrawingTestContext.mm
         ${GMPI_UI_SDK}/backends/DirectXGfx.cpp
     )
 else()
     add_executable(gmpi_ui_tests
         tests/drawing_tests.cpp
+        tests/text_tests.cpp
         tests/DrawingTestContext.cpp
         ${GMPI_UI_SDK}/backends/DirectXGfx.cpp
     )
