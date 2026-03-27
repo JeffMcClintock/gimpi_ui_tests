@@ -1897,62 +1897,7 @@ TEST_F(DrawingTest, BlurNeumorphicBump)
 // pixel-by-pixel so shadows are clipped to the interior without overpainting
 // the background — works correctly regardless of what the background contains.
 
-#if 0 // Jeffs. cheats on the clipping by just filling teh outer area with teh BG color.
-TEST_F(DrawingTest, BlurNeumorphicDip)
-{
-    constexpr uint32_t kW = 128, kH = 128;
-    auto factory = g.getFactory();
-    auto bigRT = factory.createCpuRenderTarget({ kW, kH }, kRenderFlags);
-    bigRT.beginDraw();
-    {
-        const Color bgColor = colorFromHex(0xE0E0E0u);
-        bigRT.clear(bgColor);
 
-        const RoundedRect shape{ {24.f, 24.f, 104.f, 104.f}, 16.f, 16.f };
-        const gmpi::drawing::Rect bounds{ 0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH) };
-        constexpr float offset = 4.f;
-
-        // step one a rounded rect hole geometry for the inner shadows: a large rectangle with a rounded-rect hole.
-        auto makeHoleGeometry = [&](float dx, float dy) {
-            auto geom = bigRT.getFactory().createPathGeometry();
-            auto sink = geom.open();
-            sink.setFillMode(FillMode::Alternate);
-            sink.addRect({ 0, 0, static_cast<float>(kW), static_cast<float>(kH) }, FigureBegin::Filled);
-            sink.addRoundedRect({ {shape.rect.left + dx, shape.rect.top + dy,
-                                  shape.rect.right + dx, shape.rect.bottom + dy},
-                                 shape.radiusX, shape.radiusY });
-            sink.close();
-            return geom;
-            };
-
-        // draw the shadow.
-        auto darkGeom = makeHoleGeometry(offset, offset);
-        cachedBlur innerDark;
-        innerDark.tint = Color{ 0.f, 0.f, 0.f, 0.5f };
-        innerDark.draw(bigRT, bounds, [&](Graphics& mask) {
-            auto brush = mask.createSolidColorBrush(Colors::White);
-            mask.fillGeometry(darkGeom, brush);
-            });
-
-        // draw the highlight.
-        // Light inner highlight (bottom & right): hole shifted up-left.
-        auto lightGeom = makeHoleGeometry(-offset, -offset);
-        cachedBlur innerLight;
-        innerLight.tint = Color{ 1.f, 1.f, 1.f, 0.8f };
-        innerLight.draw(bigRT, bounds, [&](Graphics& mask) {
-            auto brush = mask.createSolidColorBrush(Colors::White);
-            mask.fillGeometry(lightGeom, brush);
-            });
-
-        // mask off everything outside the dip;
-        auto maskGeom = makeHoleGeometry(0, 0);
-        bigRT.fillGeometry(maskGeom, bigRT.createSolidColorBrush(bgColor));
-    }
-    bigRT.endDraw();
-
-    EXPECT_TRUE(checkBitmap("blurNeumorphicDip", bigRT, 2));
-}
-#else // Clauds doubtful attempt. not sure we need 15 bits per pixel for the clip mask.
 TEST_F(DrawingTest, BlurNeumorphicDip)
 {
     constexpr uint32_t kW = 128, kH = 128;
@@ -2057,7 +2002,6 @@ TEST_F(DrawingTest, BlurNeumorphicDip)
 
     EXPECT_TRUE(checkBitmap("blurNeumorphicDip", bigRT, 2));
 }
-#endif
 
 // Create an 8-bit (monochrome, single-plane) mask bitmap, draw a circle on it,
 // then verify pixel format and spot-check pixel values.
