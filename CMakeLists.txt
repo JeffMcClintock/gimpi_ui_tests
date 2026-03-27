@@ -45,14 +45,16 @@ FetchContent_MakeAvailable(googletest)
 # Test executable
 # ---------------------------------------------------------------------------
 if(APPLE)
-    # Use the .mm wrapper so drawing_tests.cpp is compiled as Objective-C++.
+    # Use .mm wrappers so Objective-C++ backend code compiles cleanly.
     add_executable(gmpi_ui_tests
         tests/drawing_tests_mac.mm
+        tests/DrawingTestContext.mm
         ${GMPI_UI_SDK}/backends/DirectXGfx.cpp
     )
 else()
     add_executable(gmpi_ui_tests
         tests/drawing_tests.cpp
+        tests/DrawingTestContext.cpp
         ${GMPI_UI_SDK}/backends/DirectXGfx.cpp
     )
 endif()

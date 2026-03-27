@@ -34,80 +34,14 @@
 #include <sstream>
 #include <string>
 
-#ifdef _WIN32
-#include "backends/DirectXGfx.h"
-#endif
-#ifdef __APPLE__
-#include "backends/CocoaGfx.h"
-#endif
 #include "Drawing.h"
 #include "helpers/BitmapMask.h"
 #include "helpers/CachedBlur.h"
 #include "helpers/SavePng.h"
+#include "DrawingTestContext.h"
 
 using namespace gmpi::drawing;
 using namespace gmpi::drawing::Colors;
-
-#ifdef _WIN32
-// Creates a 128x20 sRGB gradient PNG where column x has grey value x (0..127).
-// Only writes the file if it does not already exist.
-static bool createSRGBGradientPng(const std::filesystem::path& path)
-{
-    if (std::filesystem::exists(path))
-        return true;
-
-    std::filesystem::create_directories(path.parent_path());
-
-    constexpr uint32_t W = 128, H = 20;
-    // Raw BGRA pixels — fully opaque grey, sRGB value = column index.
-    std::vector<uint8_t> pixels(W * H * 4);
-    for (uint32_t y = 0; y < H; ++y)
-        for (uint32_t x = 0; x < W; ++x)
-        {
-            uint8_t v = static_cast<uint8_t>(x); // sRGB grey 0..127
-            uint8_t* p = pixels.data() + (y * W + x) * 4;
-            p[0] = v;   // B
-            p[1] = v;   // G
-            p[2] = v;   // R
-            p[3] = 255; // A
-        }
-
-    IWICImagingFactory* rawWic{};
-    CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
-        __uuidof(IWICImagingFactory), reinterpret_cast<void**>(&rawWic));
-    gmpi::directx::ComPtr<IWICImagingFactory> wic(rawWic);
-    if (!wic) return false;
-
-    IWICStream* rawStream{};
-    wic->CreateStream(&rawStream);
-    gmpi::directx::ComPtr<IWICStream> stream(rawStream);
-    if (!stream) return false;
-    stream->InitializeFromFilename(path.wstring().c_str(), GENERIC_WRITE);
-
-    IWICBitmapEncoder* rawEncoder{};
-    wic->CreateEncoder(GUID_ContainerFormatPng, nullptr, &rawEncoder);
-    gmpi::directx::ComPtr<IWICBitmapEncoder> encoder(rawEncoder);
-    if (!encoder) return false;
-    encoder->Initialize(stream, WICBitmapEncoderNoCache);
-
-    IWICBitmapFrameEncode* rawFrame{};
-    IPropertyBag2* props{};
-    encoder->CreateNewFrame(&rawFrame, &props);
-    gmpi::directx::ComPtr<IWICBitmapFrameEncode> frame(rawFrame);
-    if (props) props->Release();
-    if (!frame) return false;
-
-    frame->Initialize(nullptr);
-    frame->SetSize(W, H);
-    WICPixelFormatGUID fmt = GUID_WICPixelFormat32bppBGRA;
-    frame->SetPixelFormat(&fmt);
-    frame->WritePixels(H, W * 4, static_cast<UINT>(pixels.size()), pixels.data());
-    frame->Commit();
-    encoder->Commit();
-
-    return true;
-}
-#endif // _WIN32
 
 
 // ============================================================
@@ -119,20 +53,14 @@ protected:
     static constexpr uint32_t kWidth  = 64;
     static constexpr uint32_t kHeight = 64;
 
-    // No format flag → WIC bitmap is 64bppPRGBAHalf (8 bytes/pixel).
-    // This matches the float-precision swapchain used by gmpi_ui on screen,
+    // No format flag → bitmap is 64bppPRGBAHalf (8 bytes/pixel) on Windows,
+    // 128bpp float on macOS. Matches the float-precision swapchain used on screen,
     // giving accurate colour round-trips with no 8-bit linear quantisation.
     static constexpr int32_t kRenderFlags = 0;
 
-    gmpi::drawing::Factory drawingFactory;
+    DrawingTestContext drawingContext;
     gmpi::drawing::BitmapRenderTarget g;
     bool drawingActive = false;
-#ifdef _WIN32
-    std::unique_ptr<gmpi::directx::Factory> dxFactory;
-#endif
-#ifdef __APPLE__
-    std::unique_ptr<gmpi::cocoa::Factory> cocoaFactory;
-#endif
 
     static std::filesystem::path referenceDir()
     {
@@ -141,17 +69,7 @@ protected:
 
     void SetUp() override
     {
-#ifdef _WIN32
-        CoInitialize(nullptr);
-        dxFactory = std::make_unique<gmpi::directx::Factory>();
-        *AccessPtr::put(drawingFactory) = dxFactory.get();
-#endif
-#ifdef __APPLE__
-        cocoaFactory = std::make_unique<gmpi::cocoa::Factory>();
-        *AccessPtr::put(drawingFactory) = cocoaFactory.get();
-#endif
-        g = drawingFactory.createCpuRenderTarget({ kWidth, kHeight }, kRenderFlags);
-
+        g = drawingContext.createCpuRenderTarget({ kWidth, kHeight }, kRenderFlags);
         g.beginDraw();
         drawingActive = true;
         g.clear(Colors::White);
@@ -174,7 +92,7 @@ protected:
         FontStretch        stretch = FontStretch::Normal)
     {
         std::string_view familySv{family};
-        return drawingFactory.createTextFormat(height, {&familySv, 1}, weight, style, stretch);
+        return drawingContext.factory().createTextFormat(height, {&familySv, 1}, weight, style, stretch);
     }
 
     // Build an 8x8 checkerboard bitmap using a small render target, then
@@ -183,7 +101,7 @@ protected:
                                       Color color2 = Colors::White)
     {
         constexpr uint32_t kPat = 8;
-        auto patRT = drawingFactory.createCpuRenderTarget({kPat, kPat}, kRenderFlags);
+        auto patRT = drawingContext.factory().createCpuRenderTarget({kPat, kPat}, kRenderFlags);
 
         patRT.beginDraw();
         patRT.clear(color1);
@@ -200,16 +118,8 @@ protected:
     {
         if (drawingActive)
             g.endDraw();
-        // Release rt before factory to avoid dangling pointer.
-        g = gmpi::drawing::BitmapRenderTarget{};
-        drawingFactory = {};
-#ifdef _WIN32
-        dxFactory.reset();
-        CoUninitialize();
-#endif
-#ifdef __APPLE__
-        cocoaFactory.reset();
-#endif
+        // Release render target before the factory (DrawingTestContext dtor) runs.
+        g = {};
     }
 
     // Core comparison helper — works with any already-ended BitmapRenderTarget.
@@ -232,7 +142,7 @@ protected:
         std::filesystem::remove(logPath);
 
         // Try to load the reference image.
-        auto refBitmap = drawingFactory.loadImageU(refPath.string());
+        auto refBitmap = drawingContext.factory().loadImageU(refPath.string());
 
         if (!refBitmap)
         {
@@ -756,7 +666,7 @@ TEST_F(DrawingTest, AlphaEquivalentGrey)
 TEST_F(DrawingTest, DrawBitmapNative)
 {
     // Build a 16x16 four-quadrant pattern.
-    auto patRT = drawingFactory.createCpuRenderTarget({ 16, 16 }, kRenderFlags);
+    auto patRT = drawingContext.factory().createCpuRenderTarget({ 16, 16 }, kRenderFlags);
     patRT.beginDraw();
     auto redBrush    = patRT.createSolidColorBrush(Colors::Red);
     auto greenBrush  = patRT.createSolidColorBrush(Colors::Green);
@@ -778,7 +688,7 @@ TEST_F(DrawingTest, DrawBitmapNative)
 // Stretch the same 16x16 bitmap to fill most of the render target.
 TEST_F(DrawingTest, DrawBitmapStretched)
 {
-    auto patRT = drawingFactory.createCpuRenderTarget({16, 16}, kRenderFlags);
+    auto patRT = drawingContext.factory().createCpuRenderTarget({16, 16}, kRenderFlags);
     patRT.beginDraw();
     auto redBrush    = patRT.createSolidColorBrush(Colors::Red);
     auto greenBrush  = patRT.createSolidColorBrush(Colors::Green);
@@ -800,7 +710,7 @@ TEST_F(DrawingTest, DrawBitmapStretched)
 // Stretch with bilinear interpolation — smooth edges between quadrants.
 TEST_F(DrawingTest, DrawBitmapLinearInterp)
 {
-    auto patRT = drawingFactory.createCpuRenderTarget({16, 16}, kRenderFlags);
+    auto patRT = drawingContext.factory().createCpuRenderTarget({16, 16}, kRenderFlags);
     patRT.beginDraw();
     auto redBrush    = patRT.createSolidColorBrush(Colors::Red);
     auto greenBrush  = patRT.createSolidColorBrush(Colors::Green);
@@ -821,7 +731,7 @@ TEST_F(DrawingTest, DrawBitmapLinearInterp)
 // Draw only a sub-rectangle (top-right quadrant) of the source bitmap.
 TEST_F(DrawingTest, DrawBitmapCropped)
 {
-    auto patRT = drawingFactory.createCpuRenderTarget({16, 16}, kRenderFlags);
+    auto patRT = drawingContext.factory().createCpuRenderTarget({16, 16}, kRenderFlags);
     patRT.beginDraw();
     auto redBrush    = patRT.createSolidColorBrush(Colors::Red);
     auto greenBrush  = patRT.createSolidColorBrush(Colors::Green);
@@ -843,7 +753,7 @@ TEST_F(DrawingTest, DrawBitmapCropped)
 // Draw a bitmap at 50% opacity over a coloured background.
 TEST_F(DrawingTest, DrawBitmapOpacity)
 {
-    auto patRT = drawingFactory.createCpuRenderTarget({16, 16}, kRenderFlags);
+    auto patRT = drawingContext.factory().createCpuRenderTarget({16, 16}, kRenderFlags);
     patRT.beginDraw();
     auto redBrush    = patRT.createSolidColorBrush(Colors::Red);
     auto greenBrush  = patRT.createSolidColorBrush(Colors::Green);
@@ -1360,7 +1270,7 @@ TEST_F(DrawingTest, FontMetricsVisual)
     constexpr uint32_t kW = 256, kH = 120;
 
     // Create a dedicated render target for this test.
-    auto bigRT = drawingFactory.createCpuRenderTarget({kW, kH}, kRenderFlags);
+    auto bigRT = drawingContext.factory().createCpuRenderTarget({kW, kH}, kRenderFlags);
     bigRT.beginDraw();
     bigRT.clear(Colors::White);
 
@@ -1444,16 +1354,16 @@ TEST_F(DrawingTest, ColourRoundTrip)
     const auto gradPath = referenceDir() / "colourRoundTrip.png";
 
 #ifdef _WIN32
-    ASSERT_TRUE(createSRGBGradientPng(gradPath))
+    ASSERT_TRUE(DrawingTestContext::createSRGBGradientPng(gradPath))
         << "Failed to create sRGB gradient PNG at: " << gradPath.string();
 #endif
 
     // Load the gradient PNG as a bitmap.
-    auto srcBmp = drawingFactory.loadImageU(gradPath.string());
+    auto srcBmp = drawingContext.factory().loadImageU(gradPath.string());
     ASSERT_TRUE(srcBmp) << "Failed to load gradient PNG: " << gradPath.string();
 
     // Render into a dedicated 128x20 render target, drawing the bitmap 1:1.
-    auto rt = drawingFactory.createCpuRenderTarget({128, 20}, kRenderFlags);
+    auto rt = drawingContext.factory().createCpuRenderTarget({128, 20}, kRenderFlags);
     rt.beginDraw();
     rt.drawBitmap(srcBmp, {0.f, 0.f, 128.f, 20.f}, {0.f, 0.f, 128.f, 20.f},
                   1.0f, BitmapInterpolationMode::NearestNeighbor);
