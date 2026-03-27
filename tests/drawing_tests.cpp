@@ -11,17 +11,6 @@
 //  4. On future regression: the test FAILs and writes
 //     reference_images/<testName>_actual.png alongside a diff log.
 
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
-#include <wincodec.h>
-#endif
-
-#ifdef __APPLE__
-#import <Cocoa/Cocoa.h>
-#import <ImageIO/ImageIO.h>
-#endif
 
 #include <gtest/gtest.h>
 
