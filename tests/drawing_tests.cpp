@@ -2417,10 +2417,10 @@ TEST_F(DrawingTest, AdditiveBitmap)
 				brightness *= (std::clamp)(1.f - (taperGradient * (dist - rad * taperZoneStart) / rad), 0.f, 1.f);
 
                 // Premultiply and write as RGBA half-float.
-                row[x * 4 + 0] = floatToHalf(chan1 * brightness);
-                row[x * 4 + 1] = floatToHalf(chan2 * brightness);
-                row[x * 4 + 2] = floatToHalf(chan3 * brightness);
-                row[x * 4 + 3] = floatToHalf(0.0f); // additive premultiplied colors have alpha at zero to retain full brightness of background pixel.
+                row[x * 4 + 0] = gmpi::drawing::detail::floatToHalf(chan1 * brightness);
+                row[x * 4 + 1] = gmpi::drawing::detail::floatToHalf(chan2 * brightness);
+                row[x * 4 + 2] = gmpi::drawing::detail::floatToHalf(chan3 * brightness);
+                row[x * 4 + 3] = gmpi::drawing::detail::floatToHalf(0.0f); // additive premultiplied colors have alpha at zero to retain full brightness of background pixel.
             }
         }
     }
@@ -2430,7 +2430,7 @@ TEST_F(DrawingTest, AdditiveBitmap)
     bigRT.beginDraw();
     bigRT.clear(Color{0.05f, 0.05f, 0.1f, 1.0f}); // dark blue-grey
 
-    const Rect srcRect{0.f, 0.f, float(kBmpSize), float(kBmpSize)};
+    const gmpi::drawing::Rect srcRect{0.f, 0.f, float(kBmpSize), float(kBmpSize)};
     struct Pos { float x, y; };
     const Pos stamps[] = {
         {10.f,  40.f},
@@ -2442,7 +2442,7 @@ TEST_F(DrawingTest, AdditiveBitmap)
     };
     for (auto [sx, sy] : stamps)
     {
-        const Rect dst{sx, sy, sx + float(kBmpSize), sy + float(kBmpSize)};
+        const gmpi::drawing::Rect dst{sx, sy, sx + float(kBmpSize), sy + float(kBmpSize)};
         bigRT.drawBitmap(sprite, dst, srcRect);
     }
 
