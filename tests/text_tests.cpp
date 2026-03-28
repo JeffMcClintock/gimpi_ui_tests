@@ -95,14 +95,25 @@ TEST_F(DrawingTest, TextClippedByClipRect)
     EXPECT_TRUE(checkResult("textClippedByClipRect", 2));
 }
 
-// Text clipped by the layout rect — right edge of a long string is cut off.
+// Without DrawTextOptions::Clip, text overflows the layout rect (D2D default).
+TEST_F(DrawingTest, TextOverflowsLayoutRect)
+{
+    auto tf    = makeTextFormat(14.f);
+    tf.setWordWrapping(WordWrapping::NoWrap);
+    auto brush = g.createSolidColorBrush(Colors::Black);
+    // Layout rect is narrow — text overflows on the right (no clip flag).
+    g.drawTextU("Overflow Right Edge", tf, {2.f, 22.f, 40.f, 42.f}, brush);
+    EXPECT_TRUE(checkResult("textOverflowsLayoutRect", 34, 4.0));
+}
+
+// With DrawTextOptions::Clip, text is clipped to the layout rect.
 TEST_F(DrawingTest, TextClippedByLayoutRect)
 {
     auto tf    = makeTextFormat(14.f);
     tf.setWordWrapping(WordWrapping::NoWrap);
     auto brush = g.createSolidColorBrush(Colors::Black);
-    // Layout rect is narrow — text overflows and is clipped on the right.
-    g.drawTextU("ClipMe Right Edge", tf, {2.f, 22.f, 40.f, 42.f}, brush);
+    // Same narrow rect, but Clip flag is set — text should be cut off.
+    g.drawTextU("ClipMe Right Edge", tf, {2.f, 22.f, 40.f, 42.f}, brush, DrawTextOptions::Clip);
     EXPECT_TRUE(checkResult("textClippedByLayoutRect", 34, 4.0));
 }
 
