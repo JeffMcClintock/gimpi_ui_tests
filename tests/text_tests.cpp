@@ -431,7 +431,9 @@ TEST_F(DrawingTest, MultilineTightRectDefaultSpacing)
     bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 54.f}, brush);
 
     bigRT.endDraw();
-    EXPECT_TRUE(checkBitmap("multilineTightDefault", bigRT, 2, 2.0));
+    // 256x128 bitmap has half the pixels of the 256x256 non-tight variants, so
+    // the same rendering quality produces ~2x the mean diff per pixel.
+    EXPECT_TRUE(checkBitmap("multilineTightDefault", bigRT, 2, 4.0));
 }
 
 TEST_F(DrawingTest, MultilineTightRectLineHeight40)
@@ -448,7 +450,9 @@ TEST_F(DrawingTest, MultilineTightRectLineHeight40)
     bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 80.f}, brush);
 
     bigRT.endDraw();
-    EXPECT_TRUE(checkBitmap("multilineTightLH40", bigRT, 2, 2.0));
+    // 256x128 bitmap has half the pixels of the 256x256 non-tight variants, so
+    // the same rendering quality produces ~2x the mean diff per pixel.
+    EXPECT_TRUE(checkBitmap("multilineTightLH40", bigRT, 2, 4.0));
 }
 
 // --- Tight rect with paragraph alignment ---
@@ -466,7 +470,9 @@ TEST_F(DrawingTest, MultilineTightParagraphCenter)
     bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 54.f}, brush);
 
     bigRT.endDraw();
-    EXPECT_TRUE(checkBitmap("multilineTightParagraphCenter", bigRT, 2, 2.0));
+    // 256x128 bitmap has half the pixels of the 256x256 non-tight variants, so
+    // the same rendering quality produces ~2x the mean diff per pixel.
+    EXPECT_TRUE(checkBitmap("multilineTightParagraphCenter", bigRT, 2, 4.0));
 }
 
 TEST_F(DrawingTest, MultilineTightParagraphFar)
