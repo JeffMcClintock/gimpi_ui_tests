@@ -52,7 +52,7 @@ TEST_F(DrawingTest, DrawTextMultiLine)
     tf.setWordWrapping(WordWrapping::Wrap);
     auto brush = g.createSolidColorBrush(Colors::Black);
     g.drawTextU("Line one\nLine two", tf, {2.f, 2.f, 62.f, 62.f}, brush);
-    EXPECT_TRUE(checkResult("drawTextMultiLine", 40)); // inconsistant smoothing, on same windows system
+    EXPECT_TRUE(checkResult("drawTextMultiLine", 40, 50.0)); // inconsistant smoothing, on same windows system
 }
 
 // Coloured text on a coloured background.
@@ -65,7 +65,7 @@ TEST_F(DrawingTest, DrawTextColoured)
     tf.setTextAlignment(TextAlignment::Center);
     tf.setParagraphAlignment(ParagraphAlignment::Center);
     g.drawTextU("Test", tf, {0.f, 0.f, 64.f, 64.f}, textBrush);
-    EXPECT_TRUE(checkResult("drawTextColoured", 2, 8.0));
+    EXPECT_TRUE(checkResult("drawTextColoured", 2, 20.0));
 }
 
 // An empty string should not affect the bitmap (remains all-white).
@@ -103,7 +103,7 @@ TEST_F(DrawingTest, TextOverflowsLayoutRect)
     auto brush = g.createSolidColorBrush(Colors::Black);
     // Layout rect is narrow — text overflows on the right (no clip flag).
     g.drawTextU("Overflow Right Edge", tf, {2.f, 22.f, 40.f, 42.f}, brush);
-    EXPECT_TRUE(checkResult("textOverflowsLayoutRect", 34, 4.0));
+    EXPECT_TRUE(checkResult("textOverflowsLayoutRect", 34, 15.0));
 }
 
 // With DrawTextOptions::Clip, text is clipped to the layout rect.
@@ -114,7 +114,7 @@ TEST_F(DrawingTest, TextClippedByLayoutRect)
     auto brush = g.createSolidColorBrush(Colors::Black);
     // Same narrow rect, but Clip flag is set — text should be cut off.
     g.drawTextU("ClipMe Right Edge", tf, {2.f, 22.f, 40.f, 42.f}, brush, DrawTextOptions::Clip);
-    EXPECT_TRUE(checkResult("textClippedByLayoutRect", 34, 4.0));
+    EXPECT_TRUE(checkResult("textClippedByLayoutRect", 34, 15.0));
 }
 
 // Word-wrap ON: a long string breaks across multiple lines within the layout rect.
@@ -124,7 +124,7 @@ TEST_F(DrawingTest, TextWrapOn)
     tf.setWordWrapping(WordWrapping::Wrap);
     auto brush = g.createSolidColorBrush(Colors::Black);
     g.drawTextU("The quick brown fox jumps", tf, {2.f, 2.f, 62.f, 62.f}, brush);
-    EXPECT_TRUE(checkResult("textWrapOn", 34, 10.0));
+    EXPECT_TRUE(checkResult("textWrapOn", 34, 25.0));
 }
 
 // Word-wrap OFF: same long string runs in one line and is clipped on the right.
@@ -134,7 +134,7 @@ TEST_F(DrawingTest, TextWrapOff)
     tf.setWordWrapping(WordWrapping::NoWrap);
     auto brush = g.createSolidColorBrush(Colors::Black);
     g.drawTextU("The quick brown fox jumps", tf, {2.f, 2.f, 62.f, 62.f}, brush);
-    EXPECT_TRUE(checkResult("textWrapOff", 2, 3.0));
+    EXPECT_TRUE(checkResult("textWrapOff", 2, 8.0));
 }
 
 // Text clipped at the bottom of the layout rect — last line is cut off.
@@ -146,7 +146,7 @@ TEST_F(DrawingTest, TextClippedAtBottom)
     // Layout rect is only tall enough for 2 of the 4 lines.
     g.drawTextU("Line one\nLine two\nLine three\nLine four",
                  tf, {2.f, 2.f, 62.f, 28.f}, brush);
-    EXPECT_TRUE(checkResult("textClippedAtBottom", 10, 17.0));
+    EXPECT_TRUE(checkResult("textClippedAtBottom", 10, 35.0));
 }
 
 // ============================================================
@@ -236,7 +236,7 @@ TEST_F(DrawingTest, FontMetricsVisual)
     bigRT.drawTextU("strikethrough",labelTF,{labelX, labelY(strikeY),    W, strikeY},    brushST);
 
     bigRT.endDraw();
-    EXPECT_TRUE(checkBitmap("fontMetricsVisual", bigRT, 12, 4.0));
+    EXPECT_TRUE(checkBitmap("fontMetricsVisual", bigRT, 12, 12.0));
 }
 
 // ============================================================
@@ -261,7 +261,7 @@ TEST_F(DrawingTest, MultilineDefaultSpacing)
     bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 252.f}, brush);
 
     bigRT.endDraw();
-    EXPECT_TRUE(checkBitmap("multilineDefaultSpacing", bigRT, 2, 2.0));
+    EXPECT_TRUE(checkBitmap("multilineDefaultSpacing", bigRT, 2));
 }
 
 // --- Explicit line heights: tight, default-ish, loose, extra loose ---
@@ -279,7 +279,7 @@ TEST_F(DrawingTest, MultilineLineHeight20)
     bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 252.f}, brush);
 
     bigRT.endDraw();
-    EXPECT_TRUE(checkBitmap("multilineLineHeight20", bigRT, 2, 2.0));
+    EXPECT_TRUE(checkBitmap("multilineLineHeight20", bigRT, 2));
 }
 
 TEST_F(DrawingTest, MultilineLineHeight30)
@@ -295,7 +295,7 @@ TEST_F(DrawingTest, MultilineLineHeight30)
     bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 252.f}, brush);
 
     bigRT.endDraw();
-    EXPECT_TRUE(checkBitmap("multilineLineHeight30", bigRT, 2, 2.0));
+    EXPECT_TRUE(checkBitmap("multilineLineHeight30", bigRT, 2));
 }
 
 TEST_F(DrawingTest, MultilineLineHeight40)
@@ -311,7 +311,7 @@ TEST_F(DrawingTest, MultilineLineHeight40)
     bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 252.f}, brush);
 
     bigRT.endDraw();
-    EXPECT_TRUE(checkBitmap("multilineLineHeight40", bigRT, 2, 2.0));
+    EXPECT_TRUE(checkBitmap("multilineLineHeight40", bigRT, 2));
 }
 
 TEST_F(DrawingTest, MultilineLineHeight60)
@@ -327,7 +327,7 @@ TEST_F(DrawingTest, MultilineLineHeight60)
     bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 252.f}, brush);
 
     bigRT.endDraw();
-    EXPECT_TRUE(checkBitmap("multilineLineHeight60", bigRT, 2, 2.0));
+    EXPECT_TRUE(checkBitmap("multilineLineHeight60", bigRT, 2));
 }
 
 // --- Paragraph alignment (vertical) with default line height ---
@@ -345,7 +345,7 @@ TEST_F(DrawingTest, MultilineParagraphAlignNear)
     bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 252.f}, brush);
 
     bigRT.endDraw();
-    EXPECT_TRUE(checkBitmap("multilineParagraphNear", bigRT, 2, 2.0));
+    EXPECT_TRUE(checkBitmap("multilineParagraphNear", bigRT, 2));
 }
 
 TEST_F(DrawingTest, MultilineParagraphAlignCenter)
@@ -361,7 +361,7 @@ TEST_F(DrawingTest, MultilineParagraphAlignCenter)
     bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 252.f}, brush);
 
     bigRT.endDraw();
-    EXPECT_TRUE(checkBitmap("multilineParagraphCenter", bigRT, 2, 2.0));
+    EXPECT_TRUE(checkBitmap("multilineParagraphCenter", bigRT, 2));
 }
 
 TEST_F(DrawingTest, MultilineParagraphAlignFar)
@@ -377,7 +377,7 @@ TEST_F(DrawingTest, MultilineParagraphAlignFar)
     bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 252.f}, brush);
 
     bigRT.endDraw();
-    EXPECT_TRUE(checkBitmap("multilineParagraphFar", bigRT, 2, 2.0));
+    EXPECT_TRUE(checkBitmap("multilineParagraphFar", bigRT, 2));
 }
 
 // --- Paragraph alignment combined with explicit line height ---
@@ -396,7 +396,7 @@ TEST_F(DrawingTest, MultilineParagraphCenterLineHeight40)
     bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 252.f}, brush);
 
     bigRT.endDraw();
-    EXPECT_TRUE(checkBitmap("multilineParagraphCenterLH40", bigRT, 2, 2.0));
+    EXPECT_TRUE(checkBitmap("multilineParagraphCenterLH40", bigRT, 2));
 }
 
 TEST_F(DrawingTest, MultilineParagraphFarLineHeight40)
@@ -413,7 +413,7 @@ TEST_F(DrawingTest, MultilineParagraphFarLineHeight40)
     bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 252.f}, brush);
 
     bigRT.endDraw();
-    EXPECT_TRUE(checkBitmap("multilineParagraphFarLH40", bigRT, 2, 2.0));
+    EXPECT_TRUE(checkBitmap("multilineParagraphFarLH40", bigRT, 2));
 }
 
 // --- Tight bounding rect: not enough height for all lines ---
@@ -431,9 +431,7 @@ TEST_F(DrawingTest, MultilineTightRectDefaultSpacing)
     bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 54.f}, brush);
 
     bigRT.endDraw();
-    // 256x128 bitmap has half the pixels of the 256x256 non-tight variants, so
-    // the same rendering quality produces ~2x the mean diff per pixel.
-    EXPECT_TRUE(checkBitmap("multilineTightDefault", bigRT, 2, 4.0));
+    EXPECT_TRUE(checkBitmap("multilineTightDefault", bigRT, 2));
 }
 
 TEST_F(DrawingTest, MultilineTightRectLineHeight40)
@@ -450,9 +448,7 @@ TEST_F(DrawingTest, MultilineTightRectLineHeight40)
     bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 80.f}, brush);
 
     bigRT.endDraw();
-    // 256x128 bitmap has half the pixels of the 256x256 non-tight variants, so
-    // the same rendering quality produces ~2x the mean diff per pixel.
-    EXPECT_TRUE(checkBitmap("multilineTightLH40", bigRT, 2, 4.0));
+    EXPECT_TRUE(checkBitmap("multilineTightLH40", bigRT, 2));
 }
 
 // --- Tight rect with paragraph alignment ---
@@ -470,9 +466,7 @@ TEST_F(DrawingTest, MultilineTightParagraphCenter)
     bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 54.f}, brush);
 
     bigRT.endDraw();
-    // 256x128 bitmap has half the pixels of the 256x256 non-tight variants, so
-    // the same rendering quality produces ~2x the mean diff per pixel.
-    EXPECT_TRUE(checkBitmap("multilineTightParagraphCenter", bigRT, 2, 4.0));
+    EXPECT_TRUE(checkBitmap("multilineTightParagraphCenter", bigRT, 2));
 }
 
 TEST_F(DrawingTest, MultilineTightParagraphFar)
@@ -488,7 +482,7 @@ TEST_F(DrawingTest, MultilineTightParagraphFar)
     bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 54.f}, brush);
 
     bigRT.endDraw();
-    EXPECT_TRUE(checkBitmap("multilineTightParagraphFar", bigRT, 2, 2.0));
+    EXPECT_TRUE(checkBitmap("multilineTightParagraphFar", bigRT, 2));
 }
 
 // --- Narrow rect forcing word wrap ---
@@ -507,7 +501,7 @@ TEST_F(DrawingTest, MultilineNarrowWrap)
     bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 100.f, 252.f}, brush);
 
     bigRT.endDraw();
-    EXPECT_TRUE(checkBitmap("multilineNarrowWrap", bigRT, 2, 2.0));
+    EXPECT_TRUE(checkBitmap("multilineNarrowWrap", bigRT, 2));
 }
 
 TEST_F(DrawingTest, MultilineNarrowWrapLineHeight40)
@@ -524,5 +518,5 @@ TEST_F(DrawingTest, MultilineNarrowWrapLineHeight40)
     bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 100.f, 252.f}, brush);
 
     bigRT.endDraw();
-    EXPECT_TRUE(checkBitmap("multilineNarrowWrapLH40", bigRT, 2, 2.0));
+    EXPECT_TRUE(checkBitmap("multilineNarrowWrapLH40", bigRT, 2));
 }

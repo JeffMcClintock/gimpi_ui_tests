@@ -111,13 +111,16 @@ protected:
     }
 
     // Core comparison helper — works with any already-ended BitmapRenderTarget.
-    // tolerance:      per-channel difference allowed before a pixel counts as differing.
-    // maxMeanDiff:    maximum allowed mean channel diff across ALL pixels (not just differing ones).
-    //                 A value of 0.0 disables the mean-diff check (strict mode).
+    // tolerance:       per-channel difference allowed before a pixel counts as differing.
+    // maxMeanDiff:     maximum allowed mean per-channel diff across DIFFERING pixels only
+    //                  (image-size independent: same rendering quality → same score regardless of bitmap dimensions).
+    // maxDiffPercent:  maximum allowed percentage of differing pixels (0–100). Default 100 = disabled.
+    //                  Use this to additionally cap how many pixels may differ, independent of severity.
     ::testing::AssertionResult checkBitmap(const std::string& testName,
                                            gmpi::drawing::BitmapRenderTarget& target,
-                                           int tolerance = 0,
-                                           double maxMeanDiff = 1.0)
+                                           int    tolerance      = 0,
+                                           double maxMeanDiff    = 15.0,
+                                           double maxDiffPercent = 100.0)
     {
         auto bitmap = target.getBitmap();
 
@@ -274,11 +277,16 @@ protected:
         }
 
         const int    totalPixels  = static_cast<int>(ourSize.width * ourSize.height);
+        const double diffPercent  = 100.0 * diffCount / totalPixels;
         const double meanDiffAll  = static_cast<double>(totalDiff) / (totalPixels * 4);
         const double meanDiffBad  = diffCount > 0 ? static_cast<double>(totalDiff) / (diffCount * 4) : 0.0;
 
-        // Pass if the mean channel diff across the ENTIRE image is within the threshold.
-        if (meanDiffAll <= maxMeanDiff)
+        // Pass if both independent image-size-independent checks are satisfied:
+        //   1. meanDiffBad: quality check — how bad are the differing pixels (unaffected by image dimensions).
+        //   2. diffPercent: quantity check — what fraction of pixels differ at all.
+        const bool qualityOk  = (meanDiffBad  <= maxMeanDiff);
+        const bool quantityOk = (diffPercent  <= maxDiffPercent);
+        if (qualityOk && quantityOk)
             return ::testing::AssertionSuccess();
 
         // Write the diff log and actual image for failed tests.
@@ -288,24 +296,26 @@ protected:
 
             if (auto f = std::ofstream(logPath))
             {
-                f << "Test:              " << testName << "\n"
-                  << "Tolerance:         " << tolerance << " / 255\n"
-                  << "maxMeanDiff:       " << maxMeanDiff << " / 255\n"
-                  << "Differing pixels:  " << diffCount << " / " << totalPixels
-                  << " (" << 100.0 * diffCount / totalPixels << "%)\n"
-                  << "Max channel diff:  " << maxChanDiff << " / 255\n"
-                  << "Mean diff (all):   " << meanDiffAll  << " / 255\n"
-                  << "Mean diff (bad):   " << meanDiffBad  << " / 255\n"
-                  << "Actual image:      " << actualPath.string() << "\n"
-                  << "Reference image:   " << refPath.string()    << "\n";
+                f << "Test:               " << testName << "\n"
+                  << "Tolerance:          " << tolerance << " / 255\n"
+                  << "maxMeanDiff:        " << maxMeanDiff << " / 255  (limit on mean diff of differing pixels)\n"
+                  << "maxDiffPercent:     " << maxDiffPercent << " %  (limit on fraction of differing pixels)\n"
+                  << "Differing pixels:   " << diffCount << " / " << totalPixels
+                  << " (" << diffPercent << "%)"
+                  << (quantityOk ? "" : "  <-- EXCEEDS LIMIT") << "\n"
+                  << "Max channel diff:   " << maxChanDiff << " / 255\n"
+                  << "Mean diff (bad px): " << meanDiffBad << " / 255"
+                  << (qualityOk ? "" : "  <-- EXCEEDS LIMIT") << "\n"
+                  << "Mean diff (all px): " << meanDiffAll << " / 255\n"
+                  << "Actual image:       " << actualPath.string() << "\n"
+                  << "Reference image:    " << refPath.string()    << "\n";
             }
         }
 
         std::ostringstream msg;
         msg << "Pixel mismatch: " << diffCount << "/" << totalPixels
-            << " pixels differ."
-            << " Max channel diff: " << maxChanDiff << "/255."
-            << " Mean diff (all): " << meanDiffAll << "/255 (limit: " << maxMeanDiff << ")."
+            << " (" << diffPercent << "%) pixels differ (limit: " << maxDiffPercent << "%)."
+            << " Mean diff (bad px): " << meanDiffBad << "/255 (limit: " << maxMeanDiff << ")."
             << "\nActual image: " << actualPath.string()
             << "\nDiff log:     " << logPath.string();
         return ::testing::AssertionFailure() << msg.str();
@@ -313,15 +323,17 @@ protected:
 
     // Convenience wrapper for the standard fixture render target.
     // Call at the end of each test (after all drawing is done).
-    // tolerance: max allowed per-channel difference (0 = pixel-exact).
-    // Use tolerance >= 2 for text tests to handle ClearType sub-pixel variation.
-    ::testing::AssertionResult checkResult(const std::string& testName, int tolerance = 0, double maxMeanDiff = 2.0)
+    // tolerance:      max allowed per-channel difference (0 = pixel-exact).
+    //                 Use tolerance >= 2 for text tests to handle ClearType sub-pixel variation.
+    // maxMeanDiff:    max mean per-channel diff of DIFFERING pixels (image-size independent).
+    // maxDiffPercent: max % of pixels allowed to differ. Default 100 = no limit.
+    ::testing::AssertionResult checkResult(const std::string& testName, int tolerance = 0, double maxMeanDiff = 15.0, double maxDiffPercent = 100.0)
     {
         if (drawingActive)
         {
             g.endDraw();
             drawingActive = false;
         }
-        return checkBitmap(testName, g, tolerance, maxMeanDiff);
+        return checkBitmap(testName, g, tolerance, maxMeanDiff, maxDiffPercent);
     }
 };

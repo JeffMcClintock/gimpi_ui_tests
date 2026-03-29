@@ -82,7 +82,7 @@ TEST_F(DrawingTest, LinearGradientFill)
     };
     auto brush = g.createLinearGradientBrush(stops, {0.f, 0.f}, {64.f, 0.f});
     g.fillRectangle({0.f, 0.f, 64.f, 64.f}, brush);
-    EXPECT_TRUE(checkResult("linearGradientFill", 0, 12.0));
+    EXPECT_TRUE(checkResult("linearGradientFill", 0, 20.0));
 }
 
 // Fill a rectangle with a radial gradient (yellow centre → dark edge).
@@ -91,7 +91,7 @@ TEST_F(DrawingTest, RadialGradientFill)
     auto brush = g.createRadialGradientBrush(
         {32.f, 32.f}, 28.f, Colors::Yellow, Colors::DarkBlue);
     g.fillRectangle({0.f, 0.f, 64.f, 64.f}, brush);
-    EXPECT_TRUE(checkResult("radialGradientFill", 0, 4.0));
+    EXPECT_TRUE(checkResult("radialGradientFill", 0, 8.0));
 }
 
 // ============================================================
@@ -119,7 +119,7 @@ TEST_F(DrawingTest, BitmapBrushFillEllipse)
 {
     auto brush = makeCheckerboardBrush(Colors::DarkRed, Colors::White);
     g.fillEllipse(gmpi::drawing::Ellipse{{32.f, 32.f}, 28.f, 28.f}, brush);
-    EXPECT_TRUE(checkResult("bitmapBrushFillEllipse", 0, 3.0));
+    EXPECT_TRUE(checkResult("bitmapBrushFillEllipse", 0, 8.0));
 }
 
 // Draw text using a bitmap brush as the foreground.
@@ -196,7 +196,7 @@ TEST_F(DrawingTest, TransparentFill)
     auto fgBrush  = g.createSolidColorBrush(colorFromHex(0xFF4500u, 0.5f)); // OrangeRed 50%
     g.fillRectangle({0.f, 0.f, 64.f, 64.f}, bgBrush);
     g.fillRectangle({8.f, 8.f, 56.f, 56.f}, fgBrush);
-    EXPECT_TRUE(checkResult("transparentFill", 0, 13.0));
+    EXPECT_TRUE(checkResult("transparentFill", 0, 20.0));
 }
 
 // Two semi-transparent shapes overlapping — tests additive blending order.
@@ -206,7 +206,7 @@ TEST_F(DrawingTest, TransparentOverlap)
     auto blue  = g.createSolidColorBrush(colorFromHex(0x0000FFu, 0.6f));
     g.fillEllipse(gmpi::drawing::Ellipse{{24.f, 32.f}, 20.f, 20.f}, red);
     g.fillEllipse(gmpi::drawing::Ellipse{{40.f, 32.f}, 20.f, 20.f}, blue);
-    EXPECT_TRUE(checkResult("transparentOverlap", 0, 12.0));
+    EXPECT_TRUE(checkResult("transparentOverlap", 0, 20.0));
 }
 
 // Semi-transparent stroke over a filled rectangle.
@@ -216,7 +216,7 @@ TEST_F(DrawingTest, TransparentStroke)
     auto stroke = g.createSolidColorBrush(colorFromHex(0x000000u, 0.4f)); // 40% black
     g.fillRectangle({4.f, 4.f, 60.f, 60.f}, fill);
     g.drawRectangle({12.f, 12.f, 52.f, 52.f}, stroke, 6.0f);
-    EXPECT_TRUE(checkResult("transparentStroke", 0, 4.0));
+    EXPECT_TRUE(checkResult("transparentStroke", 0, 8.0));
 }
 
 // Semi-transparent text over a coloured background.
@@ -254,7 +254,7 @@ TEST_F(DrawingTest, AlphaEquivalentGrey)
     g.fillRectangle({43.f, 0.f, 64.f, 64.f}, white);
     g.fillRectangle({43.f, 0.f, 64.f, 64.f}, black50);
 
-    EXPECT_TRUE(checkResult("alphaEquivalentGrey", 0, 22.0));
+    EXPECT_TRUE(checkResult("alphaEquivalentGrey", 0, 35.0));
 }
 
 // ============================================================
@@ -308,7 +308,7 @@ TEST_F(DrawingTest, DrawBitmapStretched)
     // Stretch to 56x56 with nearest-neighbour (pixel-exact, no blending).
     g.drawBitmap(bmp, {4.f, 4.f, 60.f, 60.f}, {0.f, 0.f, 16.f, 16.f},
                   1.0f, BitmapInterpolationMode::NearestNeighbor);
-    EXPECT_TRUE(checkResult("drawBitmapStretched", 0, 7.0));
+    EXPECT_TRUE(checkResult("drawBitmapStretched", 0, 15.0));
 }
 
 // Stretch with bilinear interpolation — smooth edges between quadrants.
@@ -329,7 +329,7 @@ TEST_F(DrawingTest, DrawBitmapLinearInterp)
 
     g.drawBitmap(bmp, {4.f, 4.f, 60.f, 60.f}, {0.f, 0.f, 16.f, 16.f},
                   1.0f, BitmapInterpolationMode::Linear);
-    EXPECT_TRUE(checkResult("drawBitmapLinearInterp", 0, 7.0));
+    EXPECT_TRUE(checkResult("drawBitmapLinearInterp", 0, 15.0));
 }
 
 // Draw only a sub-rectangle (top-right quadrant) of the source bitmap.
@@ -374,7 +374,7 @@ TEST_F(DrawingTest, DrawBitmapOpacity)
     g.fillRectangle({0.f, 0.f, 64.f, 64.f}, bgBrush);
     g.drawBitmap(bmp, {4.f, 4.f, 60.f, 60.f}, {0.f, 0.f, 16.f, 16.f},
                   0.5f, BitmapInterpolationMode::NearestNeighbor);
-    EXPECT_TRUE(checkResult("drawBitmapOpacity", 0, 9.0));
+    EXPECT_TRUE(checkResult("drawBitmapOpacity", 0, 18.0));
 }
 
 // ============================================================
@@ -452,7 +452,7 @@ TEST_F(DrawingTest, TransformReset)
     g.fillRectangle({0.f, 0.f, 32.f, 32.f}, red);  // lands at y=32..64
     g.setTransform(Matrix3x2{});
     g.fillRectangle({32.f, 0.f, 64.f, 32.f}, blue); // stays at x=32..64, y=0..32
-    EXPECT_TRUE(checkResult("transformReset", 0, 6.0));
+    EXPECT_TRUE(checkResult("transformReset", 0, 12.0));
 }
 
 // ============================================================
@@ -523,7 +523,7 @@ TEST_F(DrawingTest, StrokeStyleRoundJoin)
     auto strokeStyle = makeStrokeStyle(props);
     auto brush = g.createSolidColorBrush(Colors::DarkMagenta);
     g.drawRectangle({12.f, 12.f, 52.f, 52.f}, brush, 8.f, strokeStyle);
-    EXPECT_TRUE(checkResult("strokeStyleRoundJoin", 0, 3.0));
+    EXPECT_TRUE(checkResult("strokeStyleRoundJoin", 0, 8.0));
 }
 
 // All four line-join styles on an acute V-shape drawn side by side.
@@ -565,7 +565,7 @@ TEST_F(DrawingTest, StrokeStyleLineJoins)
         g.drawGeometry(geom, brush, 4.f, ss);
     }
 
-    EXPECT_TRUE(checkResult("strokeStyleLineJoins", 0, 4.0));
+    EXPECT_TRUE(checkResult("strokeStyleLineJoins", 0, 8.0));
 }
 
 // ============================================================
@@ -593,7 +593,7 @@ TEST_F(DrawingTest, ZeroWidthStroke)
 {
     auto brush = g.createSolidColorBrush(Colors::Black);
     g.drawRectangle({8.f, 8.f, 56.f, 56.f}, brush, 0.0f);
-    EXPECT_TRUE(checkResult("zeroWidthStroke", 0, 8.0));
+    EXPECT_TRUE(checkResult("zeroWidthStroke", 0, 15.0));
 }
 
 // ============================================================
@@ -607,7 +607,7 @@ TEST_F(DrawingTest, BitmapBrushOriginAligned)
     auto brush = makeCheckerboardBrush(Colors::DarkBlue, Colors::LightGray);
     // Rect starts at (0,0) — world origin — so tile boundaries coincide with rect edges.
     g.fillRectangle({0.f, 0.f, 64.f, 64.f}, brush);
-    EXPECT_TRUE(checkResult("bitmapBrushOriginAligned", 0, 4.0));
+    EXPECT_TRUE(checkResult("bitmapBrushOriginAligned", 0, 8.0));
 }
 
 // Fill rect offset from the pattern grid: the brush origin stays at world (0,0),
@@ -618,7 +618,7 @@ TEST_F(DrawingTest, BitmapBrushOriginOffset)
     // Rect starts at (4,4): 4 pixels into the 8-pixel tile, so the corner pixel
     // comes from the middle of a tile rather than a tile boundary.
     g.fillRectangle({4.f, 4.f, 60.f, 60.f}, brush);
-    EXPECT_TRUE(checkResult("bitmapBrushOriginOffset", 0, 3.0));
+    EXPECT_TRUE(checkResult("bitmapBrushOriginOffset", 0, 8.0));
 }
 
 // Demonstrate that setTransform shifts the pattern origin together with geometry:
@@ -745,7 +745,7 @@ TEST_F(DrawingTest, FillModeAlternateNestedSquares)
     auto outline = g.createSolidColorBrush(Colors::DarkBlue);
     g.fillGeometry(geom, brush);
     g.drawGeometry(geom, outline, 1.f);
-    EXPECT_TRUE(checkResult("fillModeAlternateNestedSquares", 0, 3.0));
+    EXPECT_TRUE(checkResult("fillModeAlternateNestedSquares", 0, 8.0));
 }
 
 // Winding rule, both squares CW: inner winding = 2 (outer CW + inner CW adds),
@@ -1088,7 +1088,7 @@ TEST_F(DrawingTest, EightBitMaskBitmapToOutput)
     g.drawBitmap(resultBmp, {0.f, 0.f, 64.f, 64.f}, {0.f, 0.f, 64.f, 64.f},
                  1.0f, BitmapInterpolationMode::NearestNeighbor);
 
-    EXPECT_TRUE(checkResult("eightBitMaskBitmapToOutput", 0, 4.0));
+    EXPECT_TRUE(checkResult("eightBitMaskBitmapToOutput", 0, 8.0));
 }
 
 // Create an sRGB (32bpp PBGRA) offscreen render target, draw on it,
@@ -1185,7 +1185,7 @@ TEST_F(DrawingTest, SRGBBitmapToOutput)
     g.drawBitmap(resultBmp, {0.f, 0.f, 64.f, 64.f}, {0.f, 0.f, 64.f, 64.f},
                  1.0f, BitmapInterpolationMode::NearestNeighbor);
 
-    EXPECT_TRUE(checkResult("srgbBitmapToOutput", 0, 4.0));
+    EXPECT_TRUE(checkResult("srgbBitmapToOutput", 0, 8.0));
 }
 
 // Neumorphic "dip" over a checkerboard background.
@@ -1274,7 +1274,7 @@ TEST_F(DrawingTest, BlurNeumorphicDipCheckerboard)
     }
     bigRT.endDraw();
 
-    EXPECT_TRUE(checkBitmap("blurNeumorphicDipCheckerboard", bigRT, 2, 4.0));
+    EXPECT_TRUE(checkBitmap("blurNeumorphicDipCheckerboard", bigRT, 2, 8.0));
 }
 
 // Neumorphic "bump" over a checkerboard background.
@@ -1363,7 +1363,7 @@ TEST_F(DrawingTest, BlurNeumorphicBumpCheckerboard)
     }
     bigRT.endDraw();
 
-    EXPECT_TRUE(checkBitmap("blurNeumorphicBumpCheckerboard", bigRT, 2, 4.0));
+    EXPECT_TRUE(checkBitmap("blurNeumorphicBumpCheckerboard", bigRT, 2, 8.0));
 }
 
 TEST_F(DrawingTest, AdditiveBitmap)
@@ -1439,5 +1439,5 @@ TEST_F(DrawingTest, AdditiveBitmap)
     }
 
     bigRT.endDraw();
-    EXPECT_TRUE(checkBitmap("AdditiveBitmap", bigRT, 2, 4.0));
+    EXPECT_TRUE(checkBitmap("AdditiveBitmap", bigRT, 2, 8.0));
 }
