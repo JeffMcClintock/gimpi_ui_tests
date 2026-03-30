@@ -949,7 +949,7 @@ TEST_F(DrawingTest, BlurNeumorphicDip)
         shadowRT.clear(Color{0.f, 0.f, 0.f, 0.f}); // transparent
         {
             cachedBlur innerDark;
-            innerDark.tint = Color{ 0.f, 0.f, 0.f, 0.5f };
+            innerDark.tint = Color{ 0.f, 0.f, 0.f, 1.0f };
             innerDark.draw(shadowRT, bounds, [&](Graphics& m) {
                 auto darkGeom = makeHoleGeom(m, offset, offset);
                 auto brush = m.createSolidColorBrush(Colors::White);
@@ -957,7 +957,7 @@ TEST_F(DrawingTest, BlurNeumorphicDip)
             });
 
             cachedBlur innerLight;
-            innerLight.tint = Color{ 1.f, 1.f, 1.f, 0.8f };
+            innerLight.tint = Color{ 1.f, 1.f, 1.f, 1.0f };
             innerLight.draw(shadowRT, bounds, [&](Graphics& m) {
                 auto lightGeom = makeHoleGeom(m, -offset, -offset);
                 auto brush = m.createSolidColorBrush(Colors::White);
@@ -1223,7 +1223,7 @@ TEST_F(DrawingTest, BlurNeumorphicDipCheckerboard)
     shadowRT.clear(Color{0.f, 0.f, 0.f, 0.f});
     {
         cachedBlur innerDark;
-        innerDark.tint = Color{0.f, 0.f, 0.f, 0.5f};
+        innerDark.tint = Color{0.f, 0.f, 0.f, 1.0f };
         innerDark.draw(shadowRT, bounds, [&](Graphics& m) {
             auto darkGeom = makeHoleGeom(m, offset, offset);
             auto brush = m.createSolidColorBrush(Colors::White);
@@ -1231,7 +1231,7 @@ TEST_F(DrawingTest, BlurNeumorphicDipCheckerboard)
         });
 
         cachedBlur innerLight;
-        innerLight.tint = Color{1.f, 1.f, 1.f, 0.8f};
+        innerLight.tint = Color{1.f, 1.f, 1.f, 1.0f };
         innerLight.draw(shadowRT, bounds, [&](Graphics& m) {
             auto lightGeom = makeHoleGeom(m, -offset, -offset);
             auto brush = m.createSolidColorBrush(Colors::White);
@@ -1284,7 +1284,7 @@ TEST_F(DrawingTest, BlurNeumorphicBumpCheckerboard)
 {
     constexpr uint32_t kW = 128, kH = 128;
     constexpr int32_t kMask = (int32_t)BitmapRenderTargetFlags::Mask
-                                | (int32_t)BitmapRenderTargetFlags::CpuReadable;
+                            | (int32_t)BitmapRenderTargetFlags::CpuReadable;
     constexpr int32_t kColorCpu = (int32_t)BitmapRenderTargetFlags::CpuReadable;
 
     auto factory = g.getFactory();
@@ -1300,7 +1300,7 @@ TEST_F(DrawingTest, BlurNeumorphicBumpCheckerboard)
     {
         // Light shadow (top-left): shape shifted down-right so blur spills up-left.
         cachedBlur lightShadow;
-        lightShadow.tint = Color{1.f, 1.f, 1.f, 0.7f};
+        lightShadow.tint = Color{1.f, 1.f, 1.f, 1.0f};
         lightShadow.draw(shadowRT, bounds, [&](Graphics& m) {
             auto brush = m.createSolidColorBrush(Colors::White);
             RoundedRect shifted = shape;
@@ -1310,7 +1310,7 @@ TEST_F(DrawingTest, BlurNeumorphicBumpCheckerboard)
 
         // Dark shadow (bottom-right): shape shifted up-left so blur spills down-right.
         cachedBlur darkShadow;
-        darkShadow.tint = Color{0.f, 0.f, 0.f, 0.5f};
+        darkShadow.tint = Color{0.f, 0.f, 0.f, 1.0f};
         darkShadow.draw(shadowRT, bounds, [&](Graphics& m) {
             auto brush = m.createSolidColorBrush(Colors::White);
             RoundedRect shifted = shape;
@@ -1403,11 +1403,14 @@ TEST_F(DrawingTest, AdditiveBitmap)
 			// taper bightness at the edges to hid the squareness of the image.
 			brightness *= (std::clamp)(1.f - (taperGradient * (dist - rad * taperZoneStart) / rad), 0.f, 1.f);
 
-			// Premultiply and write as RGBA half-float.
-			pixel->setR(chan1 * brightness);
-			pixel->setG(chan2 * brightness);
-			pixel->setB(chan3 * brightness);
-			pixel->setA(0.0f); // additive premultiplied colors have alpha at zero to retain full brightness of background pixel.
+                // Premultiply and write as RGBA half-float.
+                const float rgba[] = {
+                    chan1 * brightness,
+                    chan2 * brightness,
+                    chan3 * brightness,
+                    0.0f // additive premultiplied colors have alpha at zero to retain full brightness of background pixel.
+                };
+                pixel->setRGBA(rgba);
 		}
 	}
 
