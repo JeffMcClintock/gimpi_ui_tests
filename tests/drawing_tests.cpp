@@ -1381,8 +1381,6 @@ TEST_F(DrawingTest, AdditiveBitmap)
         auto pixels = sprite.lockPixels(BitmapLockFlags::Write);
         ASSERT_TRUE(pixels);
 
-        uint8_t*      data = const_cast<uint8_t*>(pixels.getAddress());
-        const int32_t bpr  = pixels.getBytesPerRow();
         const float   cx   = kBmpSize * 0.5f;
         const float   cy   = kBmpSize * 0.5f;
         const float   rad  = kBmpSize * 0.5f;
@@ -1395,27 +1393,23 @@ TEST_F(DrawingTest, AdditiveBitmap)
         constexpr float taperZoneStart = 0.5f; // linear taper at edge to hide squareness.
         constexpr float taperGradient = 1.0f / (1.0f - taperZoneStart); // linear taper at edge to hide squareness.
 
-        for (uint32_t y = 0; y < kBmpSize; ++y)
-        {
-            uint16_t* row = reinterpret_cast<uint16_t*>(data + y * bpr);
-            for (uint32_t x = 0; x < kBmpSize; ++x)
-            {
-                const float dx = (x + 0.5f) - cx;
-                const float dy = (y + 0.5f) - cy;
-                const float dist = std::sqrt(dx * dx + dy * dy);
-                float brightness = 1.0f / (std::max)(1.0f, 2.0f * (dist - centerRadius));
+		for(auto pixel : pixelIterator<gmpi::drawing::RgbaHalfPixel>(pixels))
+		{
+			const float dx = (pixel.x + 0.5f) - cx;
+			const float dy = (pixel.y + 0.5f) - cy;
+			const float dist = std::sqrt(dx * dx + dy * dy);
+			float brightness = 1.0f / (std::max)(1.0f, 2.0f * (dist - centerRadius));
 
-                // taper bightness at the edges to hid the squareness of the image.
-				brightness *= (std::clamp)(1.f - (taperGradient * (dist - rad * taperZoneStart) / rad), 0.f, 1.f);
+			// taper bightness at the edges to hid the squareness of the image.
+			brightness *= (std::clamp)(1.f - (taperGradient * (dist - rad * taperZoneStart) / rad), 0.f, 1.f);
 
-                // Premultiply and write as RGBA half-float.
-                row[x * 4 + 0] = gmpi::drawing::detail::floatToHalf(chan1 * brightness);
-                row[x * 4 + 1] = gmpi::drawing::detail::floatToHalf(chan2 * brightness);
-                row[x * 4 + 2] = gmpi::drawing::detail::floatToHalf(chan3 * brightness);
-                row[x * 4 + 3] = gmpi::drawing::detail::floatToHalf(0.0f); // additive premultiplied colors have alpha at zero to retain full brightness of background pixel.
-            }
-        }
-    }
+			// Premultiply and write as RGBA half-float.
+			pixel->setR(chan1 * brightness);
+			pixel->setG(chan2 * brightness);
+			pixel->setB(chan3 * brightness);
+			pixel->setA(0.0f); // additive premultiplied colors have alpha at zero to retain full brightness of background pixel.
+		}
+	}
 
     // 3. Draw onto a larger render target: dark background + 5 overlapping stamps.
     auto bigRT = factory.createCpuRenderTarget({kW, kH}, kRenderFlags);
