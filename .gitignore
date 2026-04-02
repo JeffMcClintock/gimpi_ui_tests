@@ -13,3 +13,5 @@ reference_images/*_diff.log
 /.claude
 .DS_Store
 .DS_Store
+.claude/settings.local.json
+.DS_Store
