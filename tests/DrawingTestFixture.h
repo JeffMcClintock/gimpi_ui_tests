@@ -88,16 +88,12 @@ protected:
         std::string_view markdownText,
         float height,
         const char*        family  = "Arial",
-        FontWeight         weight  = FontWeight::Regular,
-        FontStyle          style   = FontStyle::Normal,
-        FontStretch        stretch = FontStretch::Normal,
-        FontFlags          flags   = FontFlags::BodyHeight,
         TextAlignment      textAlignment      = TextAlignment::Leading,
         ParagraphAlignment paragraphAlignment = ParagraphAlignment::Near,
         WordWrapping       wordWrapping       = WordWrapping::Wrap)
     {
         std::string_view familySv{family};
-        return drawingContext.factory().createRichTextFormat(markdownText, height, {&familySv, 1}, weight, style, stretch, flags, textAlignment, paragraphAlignment, wordWrapping);
+        return drawingContext.factory().createRichTextFormat(markdownText, height, {&familySv, 1}, FontFlags::BodyHeight, textAlignment, paragraphAlignment, wordWrapping);
     }
 
     // Build an 8x8 checkerboard bitmap using a small render target, then
