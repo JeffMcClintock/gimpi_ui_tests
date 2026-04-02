@@ -157,18 +157,26 @@ protected:
         }
 
         // Compare pixels.
-        // Rendered bitmap may be 64bppPRGBAHalf (8 bytes/pixel, float linear) or
-        // 32bppPBGRA (4 bytes/pixel, 8-bit linear).  Reference bitmap is always
-        // 32bppPBGRA sRGB (as loaded from PNG).  We convert the rendered pixel to
-        // sRGB BGRA uint8_t before comparing so both sides are in the same space.
+        // We convert the rendered pixel to sRGB uint8_t (in the reference's
+        // channel order) before comparing so both sides are in the same space.
         auto ourPixels = bitmap.lockPixels(BitmapLockFlags::Read);
         auto refPixels = refBitmap.lockPixels(BitmapLockFlags::Read);
 
         const uint8_t* ourAddr = ourPixels.getAddress();
         const int32_t  ourBpr  = ourPixels.getBytesPerRow();
-        const int32_t  ourBpp  = ourBpr / static_cast<int32_t>(ourSize.width);
+        const int32_t  ourBpp  = ourPixels.getBytesPerPixel();
+        const bool     ourIsInt = ourPixels.isInteger();
+        const bool     ourIsSRGB = ourPixels.isSRGB();
         const uint8_t* refAddr = refPixels.getAddress();
         const int32_t  refBpr  = refPixels.getBytesPerRow();
+
+        // Channel indices from the reference format (loaded PNG).
+        // Layout 0=BGRA, 1=RGBA.
+        const int32_t refLayout = refPixels.channelLayout();
+        const int iR = (refLayout == 0) ? 2 : 0;
+        const int iG = 1;
+        const int iB = (refLayout == 0) ? 0 : 2;
+        const int iA = 3;
 
         int     diffCount   = 0;
         int     maxChanDiff = 0;
@@ -178,84 +186,64 @@ protected:
         {
             for (uint32_t x = 0; x < ourSize.width; ++x)
             {
-                // Convert rendered pixel → sRGB BGRA uint8_t[4].
                 uint8_t rendered[4];
-#ifdef _WIN32
-                if (ourBpp == 8)
-                {
-                    // 64bppPRGBAHalf: linear premultiplied RGBA half-float.
-                    const uint16_t* h = reinterpret_cast<const uint16_t*>(
-                        ourAddr + y * ourBpr + x * 8);
-                    float fr = gmpi::drawing::detail::halfToFloat(h[0]);
-                    float fg = gmpi::drawing::detail::halfToFloat(h[1]);
-                    float fb = gmpi::drawing::detail::halfToFloat(h[2]);
-                    float fa = gmpi::drawing::detail::halfToFloat(h[3]);
 
-                    uint8_t a = static_cast<uint8_t>(std::clamp(fa * 255.0f + 0.5f, 0.0f, 255.0f));
-                    if (fa > 0.0f)
-                    {
-                        fr = std::clamp(fr / fa, 0.0f, 1.0f);
-                        fg = std::clamp(fg / fa, 0.0f, 1.0f);
-                        fb = std::clamp(fb / fa, 0.0f, 1.0f);
-                    }
-                    else { fr = fg = fb = 0.0f; }
-
-                    rendered[0] = detail::linearToSRGB_f(fb); // B
-                    rendered[1] = detail::linearToSRGB_f(fg); // G
-                    rendered[2] = detail::linearToSRGB_f(fr); // R
-                    rendered[3] = a;
-                }
-                else
+                if (ourIsSRGB)
                 {
-                    // 32bppPBGRA: linear premultiplied BGRA 8-bit.
-                    const uint8_t* p = ourAddr + y * ourBpr + x * 4;
-                    uint8_t a = p[3];
-                    if (a == 0)
-                    {
-                        rendered[0] = rendered[1] = rendered[2] = rendered[3] = 0;
-                    }
-                    else
-                    {
-                        float fa = a / 255.0f;
-                        rendered[2] = detail::linearToSRGB(static_cast<uint8_t>(std::clamp(p[2] / fa + 0.5f, 0.0f, 255.0f)));
-                        rendered[1] = detail::linearToSRGB(static_cast<uint8_t>(std::clamp(p[1] / fa + 0.5f, 0.0f, 255.0f)));
-                        rendered[0] = detail::linearToSRGB(static_cast<uint8_t>(std::clamp(p[0] / fa + 0.5f, 0.0f, 255.0f)));
-                        rendered[3] = a;
-                    }
-                }
-#else
-                if (ourBpp == 16)
-                {
-                    // 128bpp float: premultiplied RGBA 32-bit float, linear sRGB.
-                    const float* f = reinterpret_cast<const float*>(
-                        ourAddr + y * ourBpr + x * 16);
-                    float fr = f[0];
-                    float fg = f[1];
-                    float fb = f[2];
-                    float fa = f[3];
-
-                    uint8_t a = static_cast<uint8_t>(std::clamp(fa * 255.0f + 0.5f, 0.0f, 255.0f));
-                    if (fa > 0.0f)
-                    {
-                        fr = std::clamp(fr / fa, 0.0f, 1.0f);
-                        fg = std::clamp(fg / fa, 0.0f, 1.0f);
-                        fb = std::clamp(fb / fa, 0.0f, 1.0f);
-                    }
-                    else { fr = fg = fb = 0.0f; }
-
-                    rendered[0] = detail::linearToSRGB_f(fr); // R
-                    rendered[1] = detail::linearToSRGB_f(fg); // G
-                    rendered[2] = detail::linearToSRGB_f(fb); // B
-                    rendered[3] = a;
-                }
-                else
-                {
-                    // 32bpp: sRGB RGBA directly (SRGBPixels or loaded PNG).
-                    const uint8_t* p = ourAddr + y * ourBpr + x * 4;
+                    // Already sRGB — channel order matches reference. Copy directly.
+                    const uint8_t* p = ourAddr + y * ourBpr + x * ourBpp;
                     rendered[0] = p[0]; rendered[1] = p[1];
                     rendered[2] = p[2]; rendered[3] = p[3];
                 }
-#endif
+                else
+                {
+                    // High-precision linear format — decode to float RGBA.
+                    float fr, fg, fb, fa;
+                    if (ourBpp == 8 && !ourIsInt)
+                    {
+                        // 64bpp premultiplied RGBA half-float (Windows).
+                        const uint16_t* h = reinterpret_cast<const uint16_t*>(
+                            ourAddr + y * ourBpr + x * 8);
+                        fr = gmpi::drawing::detail::halfToFloat(h[0]);
+                        fg = gmpi::drawing::detail::halfToFloat(h[1]);
+                        fb = gmpi::drawing::detail::halfToFloat(h[2]);
+                        fa = gmpi::drawing::detail::halfToFloat(h[3]);
+                    }
+                    else if (ourBpp == 8 && ourIsInt)
+                    {
+                        // 64bpp premultiplied RGBA uint16 (macOS).
+                        const uint16_t* u = reinterpret_cast<const uint16_t*>(
+                            ourAddr + y * ourBpr + x * 8);
+                        constexpr float inv65535 = 1.0f / 65535.0f;
+                        fr = u[0] * inv65535;
+                        fg = u[1] * inv65535;
+                        fb = u[2] * inv65535;
+                        fa = u[3] * inv65535;
+                    }
+                    else
+                    {
+                        // 128bpp premultiplied RGBA float.
+                        const float* f = reinterpret_cast<const float*>(
+                            ourAddr + y * ourBpr + x * 16);
+                        fr = f[0]; fg = f[1]; fb = f[2]; fa = f[3];
+                    }
+
+                    // Un-premultiply.
+                    uint8_t a = static_cast<uint8_t>(std::clamp(fa * 255.0f + 0.5f, 0.0f, 255.0f));
+                    if (fa > 0.0f)
+                    {
+                        fr = std::clamp(fr / fa, 0.0f, 1.0f);
+                        fg = std::clamp(fg / fa, 0.0f, 1.0f);
+                        fb = std::clamp(fb / fa, 0.0f, 1.0f);
+                    }
+                    else { fr = fg = fb = 0.0f; }
+
+                    // Write sRGB values in reference channel order.
+                    rendered[iR] = detail::linearToSRGB_f(fr);
+                    rendered[iG] = detail::linearToSRGB_f(fg);
+                    rendered[iB] = detail::linearToSRGB_f(fb);
+                    rendered[iA] = a;
+                }
                 // Reference: sRGB BGRA from loaded PNG (always 32bppPBGRA).
                 const uint8_t* ref = refAddr + y * refBpr + x * 4;
 

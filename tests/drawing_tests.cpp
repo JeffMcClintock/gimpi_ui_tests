@@ -1117,17 +1117,18 @@ TEST_F(DrawingTest, SRGBBitmapPixelFormat)
     const int32_t  bpr  = pixels.getBytesPerRow();
     const auto     size = bmp.getSize();
 
-    // Verify 32bpp: 4 bytes per pixel → bytesPerRow == width * 4.
-    EXPECT_EQ(bpr, static_cast<int32_t>(size.width) * 4)
-        << "Expected 4 bytes per pixel (32bpp), got " << bpr
-        << " bytes per row for " << size.width << " pixels wide";
+    // Verify 32bpp sRGB format.
+    EXPECT_EQ(pixels.getBytesPerPixel(), 4)
+        << "Expected 4 bytes per pixel (32bpp)";
+    EXPECT_TRUE(pixels.isSRGB())
+        << "Expected sRGB pixel format";
 
-    // Channel indices: Windows = BGRA, macOS = RGBA.
-#ifdef _WIN32
-    constexpr int iR = 2, iG = 1, iB = 0, iA = 3;
-#else
-    constexpr int iR = 0, iG = 1, iB = 2, iA = 3;
-#endif
+    // Channel indices from pixel format layout.
+    const int32_t layout = pixels.channelLayout();
+    const int iR = (layout == 0) ? 2 : 0;
+    const int iG = 1;
+    const int iB = (layout == 0) ? 0 : 2;
+    const int iA = 3;
 
     // Centre of red rectangle (32,32) — Red should be 255, G and B near 0.
     const uint8_t* centre = data + 32 * bpr + 32 * 4;

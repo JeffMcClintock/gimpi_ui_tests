@@ -23,7 +23,7 @@ public:
 
     // Creates a CPU-readable offscreen render target of the given pixel size.
     // flags are passed through to the backend (e.g. BitmapRenderTargetFlags).
-    gmpi::drawing::BitmapRenderTarget createCpuRenderTarget(gmpi::drawing::SizeU size, int32_t flags = 0);
+    gmpi::drawing::BitmapRenderTarget createCpuRenderTarget(gmpi::drawing::SizeU size, int32_t flags = 0, float dpi = 96.0f);
 
 #ifdef _WIN32
     // Creates a 128x20 sRGB gradient PNG where column x has grey value x (0..127).
