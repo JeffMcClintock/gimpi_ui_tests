@@ -83,6 +83,23 @@ protected:
         return drawingContext.factory().createTextFormat(height, {&familySv, 1}, weight, style, stretch);
     }
 
+    // Create a RichTextFormat via the wrapper factory.
+    RichTextFormat makeRichTextFormat(
+        std::string_view markdownText,
+        float height,
+        const char*        family  = "Arial",
+        FontWeight         weight  = FontWeight::Regular,
+        FontStyle          style   = FontStyle::Normal,
+        FontStretch        stretch = FontStretch::Normal,
+        FontFlags          flags   = FontFlags::BodyHeight,
+        TextAlignment      textAlignment      = TextAlignment::Leading,
+        ParagraphAlignment paragraphAlignment = ParagraphAlignment::Near,
+        WordWrapping       wordWrapping       = WordWrapping::Wrap)
+    {
+        std::string_view familySv{family};
+        return drawingContext.factory().createRichTextFormat(markdownText, height, {&familySv, 1}, weight, style, stretch, flags, textAlignment, paragraphAlignment, wordWrapping);
+    }
+
     // Build an 8x8 checkerboard bitmap using a small render target, then
     // wrap it in a BitmapBrush tied to the main render target (rt).
     BitmapBrush makeCheckerboardBrush(Color color1 = Colors::Red,

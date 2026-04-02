@@ -149,6 +149,16 @@ TEST_F(DrawingTest, TextClippedAtBottom)
     EXPECT_TRUE(checkResult("textClippedAtBottom", 10, 35.0));
 }
 
+// Bounds height of only 1 pixel — text should still attempt to draw.
+TEST_F(DrawingTest, DrawTextWhenBoundsTooShort)
+{
+    auto tf    = makeTextFormat(12.f);
+    auto brush = g.createSolidColorBrush(Colors::Black);
+    // Layout rect spans full width but is only 1 pixel tall.
+    g.drawTextU("small bounds", tf, {0.f, 32.f, 64.f, 33.f}, brush);
+    EXPECT_TRUE(checkResult("drawTextWhenBoundsTooShort", 2));
+}
+
 // ============================================================
 // Font metrics visualisation  (256 × 120 render target)
 // ============================================================
@@ -963,4 +973,67 @@ TEST_F(DrawingTest, TextBaselineLowestPixel_CourierNew200)
     auto makeTF = [this](float h) { return makeTextFormat(h, "Courier New"); };
     int errors = runBaselineLowestPixelTest(drawingContext, makeTF, 192.0f, "Courier New");
     EXPECT_EQ(errors, 0) << errors << " baseline prediction(s) were wrong (Courier New, 192 DPI)";
+}
+
+// ============================================================
+// Rich text (markdown) tests
+// ============================================================
+
+// Simple rich text with no markdown — should render identically to plain text.
+TEST_F(DrawingTest, RichTextPlain)
+{
+    auto rtf = makeRichTextFormat("Hello", 12.f);
+    g.drawRichTextU(rtf, {2.f, 2.f, 62.f, 62.f}, g.createSolidColorBrush(Colors::Black));
+    EXPECT_TRUE(checkResult("richTextPlain", 2));
+}
+
+// Bold text via **markdown**.
+TEST_F(DrawingTest, RichTextBold)
+{
+    auto rtf = makeRichTextFormat("**Bold**", 12.f);
+    g.drawRichTextU(rtf, {2.f, 2.f, 62.f, 62.f}, g.createSolidColorBrush(Colors::Black));
+    EXPECT_TRUE(checkResult("richTextBold", 2));
+}
+
+// Italic text via *markdown*.
+TEST_F(DrawingTest, RichTextItalic)
+{
+    auto rtf = makeRichTextFormat("*Italic*", 12.f);
+    g.drawRichTextU(rtf, {2.f, 2.f, 62.f, 62.f}, g.createSolidColorBrush(Colors::Black));
+    EXPECT_TRUE(checkResult("richTextItalic", 40, 50.0));
+}
+
+// Bold italic text via ***markdown***.
+TEST_F(DrawingTest, RichTextBoldItalic)
+{
+    auto rtf = makeRichTextFormat("***BdIt***", 12.f);
+    g.drawRichTextU(rtf, {2.f, 2.f, 62.f, 62.f}, g.createSolidColorBrush(Colors::Black));
+    EXPECT_TRUE(checkResult("richTextBoldItalic", 40, 50.0));
+}
+
+// Mixed plain and bold in one string.
+TEST_F(DrawingTest, RichTextMixed)
+{
+    auto rtf = makeRichTextFormat("Hi **bold** end", 12.f);
+    g.drawRichTextU(rtf, {2.f, 2.f, 62.f, 62.f}, g.createSolidColorBrush(Colors::Black));
+    EXPECT_TRUE(checkResult("richTextMixed", 2));
+}
+
+// Centre-aligned rich text — alignment is set at creation time.
+TEST_F(DrawingTest, RichTextCentred)
+{
+    auto rtf = makeRichTextFormat("*Hi*", 12.f, "Arial",
+        FontWeight::Regular, FontStyle::Normal, FontStretch::Normal,
+        FontFlags::BodyHeight, TextAlignment::Center, ParagraphAlignment::Center);
+    g.drawRichTextU(rtf, {0.f, 0.f, 64.f, 64.f}, g.createSolidColorBrush(Colors::Black));
+    EXPECT_TRUE(checkResult("richTextCentred", 40, 50.0));
+}
+
+// Verify getTextExtentU returns a non-zero size for rich text.
+TEST_F(DrawingTest, RichTextExtent)
+{
+    auto rtf = makeRichTextFormat("**Test**", 14.f);
+    auto size = rtf.getTextExtentU();
+    EXPECT_GT(size.width, 0.f);
+    EXPECT_GT(size.height, 0.f);
 }
