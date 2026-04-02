@@ -21,7 +21,7 @@ gmpi::drawing::Factory& DrawingTestContext::factory()
     return impl_->factory;
 }
 
-gmpi::drawing::BitmapRenderTarget DrawingTestContext::createCpuRenderTarget(gmpi::drawing::SizeU size, int32_t flags)
+gmpi::drawing::BitmapRenderTarget DrawingTestContext::createCpuRenderTarget(gmpi::drawing::SizeU size, int32_t flags, float dpi)
 {
-    return impl_->factory.createCpuRenderTarget(size, flags);
+    return impl_->factory.createCpuRenderTarget(size, flags, dpi);
 }

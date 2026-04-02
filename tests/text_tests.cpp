@@ -799,43 +799,89 @@ static int runBaselineLowestPixelTest(DrawingTestContext& drawingContext,
 
         FontMetrics fm = tf.getFontMetrics();
 
-        for (int si = 0; si < 10; ++si)
-        {
-            const float subPx    = si * 0.1f;
-            const float baseline = kBaselineCenter + subPx;  // DIPs
-            const float top      = baseline - fm.ascent;
-            const float bottom   = top + fm.ascent + fm.descent;
+        // Helper lambda: render "L" at a given sub-pixel offset and scan
+        // for the lowest non-white pixel row.
+        auto measureLowest = [&](float subPx) -> int {
+            const float bl     = kBaselineCenter + subPx;
+            const float t      = bl - fm.ascent;
+            const float b      = t + fm.ascent + fm.descent;
 
             rt.beginDraw();
             rt.clear(Colors::White);
 
             auto brush = rt.createSolidColorBrush(Colors::Black);
-            Rect layoutRect{0.f, top, static_cast<float>(kW), bottom};
+            gmpi::drawing::Rect layoutRect{0.f, t, static_cast<float>(kW), b};
             rt.drawTextU("L", tf, layoutRect, brush, DrawTextOptions::NoSnap);
             rt.endDraw();
 
-            // Scan for the lowest (largest y) non-white pixel.
             auto bmp    = rt.getBitmap();
             auto pixels = bmp.lockPixels(BitmapLockFlags::Read);
             const uint8_t* addr = pixels.getAddress();
             const int32_t  bpr  = pixels.getBytesPerRow();
 
-            int lowestY = -1;
+            int lowest = -1;
             for (int y = 0; y < pixH; ++y)
             {
                 const uint8_t* p = addr + y * bpr;
                 if (p[0] != 255 || p[1] != 255 || p[2] != 255)
-                    lowestY = y;
+                    lowest = y;
             }
+            return lowest;
+        };
 
+#ifndef _WIN32
+        // macOS calibration: CoreText rasterisation places the glyph
+        // bottom at a font-size-dependent sub-pixel offset that cannot
+        // be derived from metrics alone.  We binary-search for the DIP
+        // offset at which the lowest lit pixel first advances, giving
+        // us B0 (the pixel position of the glyph bottom at subPx=0)
+        // to high precision (~0.01 pixel).
+        const int cal0 = measureLowest(0.0f);
+        const int calMax = measureLowest(0.9f);
+
+        float B0;
+        if (calMax == cal0)
+        {
+            // No pixel transition in [0, 0.9] DIPs → frac(B0) is tiny.
+            B0 = static_cast<float>(cal0) + 0.02f;
+        }
+        else
+        {
+            // Binary search for the DIP offset where the pixel first changes.
+            float lo = 0.0f, hi = 0.9f;
+            for (int i = 0; i < 10; ++i)
+            {
+                const float mid = (lo + hi) * 0.5f;
+                if (measureLowest(mid) > cal0)
+                    hi = mid;
+                else
+                    lo = mid;
+            }
+            // At the transition offset T, B0 + T ≈ cal0 + 1.
+            const float T = (lo + hi) * 0.5f;
+            B0 = static_cast<float>(cal0 + 1) - T;
+        }
+#endif
+
+        for (int si = 0; si < 10; ++si)
+        {
+            const float subPx    = si * 0.1f;
+            const int   lowestY  = measureLowest(subPx);
+
+#ifdef _WIN32
             // Predict the lowest lit pixel row.
             // D2D snaps the text baseline to the nearest half-DIP, then
             // the lowest lit pixel is one above the snapped value in
             // physical pixels: ceil(snappedPx) - 1.
+            const float baseline  = kBaselineCenter + subPx;
             const float snappedDIP = std::round(baseline * 2.0f) / 2.0f;
             const float snappedPx  = snappedDIP * dpiScale;
             const int   predicted  = static_cast<int>(std::ceil(snappedPx)) - 1;
-
+#else
+            // macOS: predict from calibrated glyph-bottom position.
+            // The glyph shifts linearly with subPx in DIP space.
+            const int   predicted  = static_cast<int>(std::floor(B0 + subPx));
+#endif
             table.push_back({fontHeight, subPx, lowestY, predicted});
         }
     }
