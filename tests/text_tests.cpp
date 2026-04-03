@@ -209,19 +209,21 @@ TEST_F(DrawingTest, FontMetricsVisual)
     auto brushST     = bigRT.createSolidColorBrush(colorFromHex(0xAD1457u, 0.7f));  // magenta
 
     const float W = static_cast<float>(kW);
+    const float labelLeft = W * 0.75f;
+    const float lineRight = labelLeft - 3;
 
-    bigRT.drawLine({0.f, ascenderY},  {W, ascenderY},  brushAsc,  1.f);
-    bigRT.drawLine({0.f, capY},       {W, capY},        brushCap,  1.f);
-    bigRT.drawLine({0.f, xhY},        {W, xhY},         brushXH,   1.f);
-    bigRT.drawLine({0.f, kBaselineY}, {W, kBaselineY},  brushBase, 1.f);
-    bigRT.drawLine({0.f, descenderY}, {W, descenderY},  brushDesc, 1.f);
+    bigRT.drawLine({0.f, ascenderY},  {lineRight, ascenderY},  brushAsc,  1.f);
+    bigRT.drawLine({0.f, capY},       {lineRight, capY},        brushCap,  1.f);
+    bigRT.drawLine({0.f, xhY},        {lineRight, xhY},         brushXH,   1.f);
+    bigRT.drawLine({0.f, kBaselineY}, {lineRight, kBaselineY},  brushBase, 1.f);
+    bigRT.drawLine({0.f, descenderY}, {lineRight, descenderY},  brushDesc, 1.f);
 
     // Underline and strikethrough as thicker dashed strokes.
     StrokeStyleProperties dashProps;
     dashProps.dashStyle = DashStyle::Dash;
     auto dashStyle = bigRT.getFactory().createStrokeStyle(dashProps);
-    bigRT.drawLine({0.f, underlineY}, {W, underlineY}, brushUL, 2.f, dashStyle);
-    bigRT.drawLine({0.f, strikeY},    {W, strikeY},    brushST, 2.f, dashStyle);
+    bigRT.drawLine({0.f, underlineY}, {lineRight, underlineY}, brushUL, 2.f, dashStyle);
+    bigRT.drawLine({0.f, strikeY},    {lineRight, strikeY},    brushST, 2.f, dashStyle);
 
     // ---- glyphs: black text drawn on top of the lines ----
     auto textBrush = bigRT.createSolidColorBrush(Colors::Black);
@@ -231,10 +233,10 @@ TEST_F(DrawingTest, FontMetricsVisual)
 
     // ---- labels (small Arial, right-aligned, matching line colour) ----
     auto labelTF = makeTextFormat(9.f);
-    labelTF.setTextAlignment(TextAlignment::Trailing);
+    labelTF.setTextAlignment(TextAlignment::Leading);
     FontMetrics labelFm = labelTF.getFontMetrics();
     const float labelW = 80.f;
-    const float labelX = W - labelW;
+    const float labelX = labelLeft; // W - labelW;
     auto labelY = [&](float lineY) { return lineY - labelFm.capHeight - 1.f; };
 
     bigRT.drawTextU("ascender",    labelTF, {labelX, labelY(ascenderY),  W, ascenderY},  brushAsc, kTextOptions);
