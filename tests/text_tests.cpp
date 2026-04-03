@@ -946,7 +946,7 @@ TEST_F(DrawingTest, TextBaselineLowestPixel125)
     int errors = runBaselineLowestPixelTest(drawingContext, makeTF, 120.0f);
 
 #ifdef _WIN32
-	constexpr int expectedErrors = 28; // 28 errors at 120 DPI due to rounding edge cases in D2D's snapping logic
+    constexpr int expectedErrors = 28; // 28 errors at 120 DPI due to rounding edge cases in D2D's snapping logic
 #else
 	constexpr int expectedErrors = 0; // macOS predictions are exact after calibration
 #endif
@@ -988,7 +988,7 @@ TEST_F(DrawingTest, TextBaselineLowestPixel_TimesNewRoman125)
 #else
     constexpr int expectedErrors = 0; // macOS predictions are exact after calibration
 #endif
-    EXPECT_EQ(errors, 28) << errors << " baseline prediction(s) were wrong (Times New Roman, 120 DPI)";
+    EXPECT_EQ(errors, expectedErrors) << errors << " baseline prediction(s) were wrong (Times New Roman, 120 DPI)";
 }
 
 TEST_F(DrawingTest, TextBaselineLowestPixel_TimesNewRoman175)

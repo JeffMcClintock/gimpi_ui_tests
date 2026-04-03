@@ -470,15 +470,45 @@ TEST_F(DrawingTest, StrokeStyleDash)
     EXPECT_TRUE(checkResult("strokeStyleDash"));
 }
 
-// Dotted line with round caps.
+// Dotted lines with varying phase (dashOffset) and dot spacing.
 TEST_F(DrawingTest, StrokeStyleDot)
 {
-    StrokeStyleProperties props;
-    props.dashStyle = DashStyle::Dot;
-    props.lineCap   = CapStyle::Round;
-    auto strokeStyle = makeStrokeStyle(props);
     auto brush = g.createSolidColorBrush(Colors::DarkGreen);
-    g.drawLine({8.f, 32.f}, {56.f, 32.f}, brush, 4.f, strokeStyle);
+    const float x0 = 4.f, x1 = 60.f, strokeWidth = 3.f;
+
+    // Row 1-4: standard Dot style with increasing dashOffset (phase)
+    for (int i = 0; i < 4; ++i)
+    {
+        StrokeStyleProperties props;
+        props.dashStyle = DashStyle::Dot;
+        props.lineCap   = CapStyle::Round;
+        props.dashOffset = i * 0.5f;           // phase 0, 0.5, 1.0, 1.5
+        auto ss = makeStrokeStyle(props);
+        float y = 6.f + i * 8.f;
+        g.drawLine({x0, y}, {x1, y}, brush, strokeWidth, ss);
+    }
+
+    // Row 5-7: custom dash patterns for different dot spacings
+    // Dashes array is {dot-length, gap-length} in stroke-width multiples.
+    const float tight[]  = {0.01f, 1.0f};      // tight spacing
+    const float medium[] = {0.01f, 2.0f};      // medium spacing
+    const float wide[]   = {0.01f, 4.0f};      // wide spacing
+
+    struct { std::span<const float> dashes; float y; } rows[] = {
+        { {tight,  2}, 40.f },
+        { {medium, 2}, 48.f },
+        { {wide,   2}, 56.f },
+    };
+
+    for (auto& row : rows)
+    {
+        StrokeStyleProperties props;
+        props.dashStyle = DashStyle::Custom;
+        props.lineCap   = CapStyle::Round;
+        auto ss = makeStrokeStyle(props, row.dashes);
+        g.drawLine({x0, row.y}, {x1, row.y}, brush, strokeWidth, ss);
+    }
+
     EXPECT_TRUE(checkResult("strokeStyleDot"));
 }
 
