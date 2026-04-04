@@ -6,12 +6,6 @@ out/
 reference_images/*_actual.png
 reference_images/*_diff.log
 .DS_Store
-.DS_Store
-.claude/settings.local.json
 .claude/settings.local.json
 .DS_Store
 /.claude
-.DS_Store
-.DS_Store
-.claude/settings.local.json
-.DS_Store
