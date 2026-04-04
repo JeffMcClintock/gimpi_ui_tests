@@ -64,6 +64,18 @@ target_include_directories(gmpi_ui_tests PRIVATE
     ${GMPI_UI_SDK}
 )
 
+# Add headers so they appear in the Xcode project navigator and are searchable.
+file(GLOB GMPI_UI_HEADERS
+    ${GMPI_UI_SDK}/*.h
+    ${GMPI_UI_SDK}/backends/*.h
+    ${GMPI_UI_SDK}/helpers/*.h
+)
+target_sources(gmpi_ui_tests PRIVATE
+    tests/DrawingTestFixture.h
+    tests/DrawingTestContext.h
+    ${GMPI_UI_HEADERS}
+)
+
 # Pass the absolute path to reference images as a compile-time string.
 # Use forward slashes so it works as a C string literal on Windows too.
 file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/reference_images" REF_IMAGES_PATH)
