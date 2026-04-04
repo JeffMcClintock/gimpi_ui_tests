@@ -70,7 +70,7 @@ TEST_F(DrawingTest, DrawTextMultiLine)
     auto tf = makeTextFormat(10.f);
     tf.setWordWrapping(WordWrapping::Wrap);
     g.clear(Colors::LightBlue);
-    auto textSize = tf.getTextExtentU("Line one\nLine two");
+    auto textSize = tf.getTextExtentU("Line one\nLine two", 60.f);
     auto whiteBrush = g.createSolidColorBrush(Colors::White);
     g.fillRectangle({2.f, 2.f, 2.f + textSize.width, 2.f + textSize.height}, whiteBrush);
     auto brush = g.createSolidColorBrush(Colors::Black);
@@ -164,7 +164,7 @@ TEST_F(DrawingTest, TextWrapOn)
     auto tf = makeTextFormat(11.f);
     tf.setWordWrapping(WordWrapping::Wrap);
     g.clear(Colors::LightBlue);
-    auto textSize = tf.getTextExtentU("The quick brown fox jumps");
+    auto textSize = tf.getTextExtentU("The quick brown fox jumps", 60.f);
     auto whiteBrush = g.createSolidColorBrush(Colors::White);
     g.fillRectangle({2.f, 2.f, 2.f + textSize.width, 2.f + textSize.height}, whiteBrush);
     auto brush = g.createSolidColorBrush(Colors::Black);
@@ -192,7 +192,7 @@ TEST_F(DrawingTest, TextClippedAtBottom)
     auto tf = makeTextFormat(11.f);
     tf.setWordWrapping(WordWrapping::Wrap);
     g.clear(Colors::LightBlue);
-    auto textSize = tf.getTextExtentU("Line one\nLine two\nLine three\nLine four");
+    auto textSize = tf.getTextExtentU("Line one\nLine two\nLine three\nLine four", 60.f);
     auto whiteBrush = g.createSolidColorBrush(Colors::White);
     g.fillRectangle({2.f, 2.f, 2.f + textSize.width, 2.f + textSize.height}, whiteBrush);
     auto brush = g.createSolidColorBrush(Colors::Black);
@@ -613,7 +613,7 @@ TEST_F(DrawingTest, MultilineNarrowWrap)
 
     auto tf = makeTextFormat(24.f);
     tf.setWordWrapping(WordWrapping::Wrap);
-    auto textSize = tf.getTextExtentU(kMultilineText);
+    auto textSize = tf.getTextExtentU(kMultilineText, 96.f);
     auto whiteBrush = bigRT.createSolidColorBrush(Colors::White);
     bigRT.fillRectangle({4.f, 4.f, 4.f + textSize.width, 4.f + textSize.height}, whiteBrush);
     auto brush = bigRT.createSolidColorBrush(Colors::Black);
@@ -634,7 +634,7 @@ TEST_F(DrawingTest, MultilineNarrowWrapLineHeight40)
     auto tf = makeTextFormat(24.f);
     tf.setWordWrapping(WordWrapping::Wrap);
     tf.setLineSpacing(40.f, 32.f);
-    auto textSize = tf.getTextExtentU(kMultilineText);
+    auto textSize = tf.getTextExtentU(kMultilineText, 96.f);
     auto whiteBrush = bigRT.createSolidColorBrush(Colors::White);
     bigRT.fillRectangle({4.f, 4.f, 4.f + textSize.width, 4.f + textSize.height}, whiteBrush);
     auto brush = bigRT.createSolidColorBrush(Colors::Black);
