@@ -12,7 +12,7 @@
 TEST_F(DrawingTest, DrawTextSimple)
 {
     auto tf    = makeTextFormat(12.f);
-    g.drawTextU("Hello", tf, {2.f, 2.f, 62.f, 62.f}, g.createSolidColorBrush(Colors::Black));
+    g.drawTextU("Hello", tf, {2.f, 2.f, 62.f, 62.f}, g.createSolidColorBrush(Colors::Black), kTextOptions);
     EXPECT_TRUE(checkResult("drawTextSimple", 2));
 }
 
@@ -23,7 +23,7 @@ TEST_F(DrawingTest, DrawTextCentred)
     tf.setTextAlignment(TextAlignment::Center);
     tf.setParagraphAlignment(ParagraphAlignment::Center);
     auto brush = g.createSolidColorBrush(Colors::Black);
-    g.drawTextU("Hi", tf, {0.f, 0.f, 64.f, 64.f}, brush);
+    g.drawTextU("Hi", tf, {0.f, 0.f, 64.f, 64.f}, brush, kTextOptions);
     EXPECT_TRUE(checkResult("drawTextCentred", 2));
 }
 
@@ -32,7 +32,7 @@ TEST_F(DrawingTest, DrawTextBold)
 {
     auto tf    = makeTextFormat(12.f, "Arial", FontWeight::Bold);
     auto brush = g.createSolidColorBrush(Colors::Black);
-    g.drawTextU("Bold", tf, {2.f, 2.f, 62.f, 62.f}, brush);
+    g.drawTextU("Bold", tf, {2.f, 2.f, 62.f, 62.f}, brush, kTextOptions);
     EXPECT_TRUE(checkResult("drawTextBold", 2));
 }
 
@@ -41,7 +41,7 @@ TEST_F(DrawingTest, DrawTextLarge)
 {
     auto tf    = makeTextFormat(24.f);
     auto brush = g.createSolidColorBrush(Colors::Black);
-    g.drawTextU("Ag", tf, {2.f, 2.f, 62.f, 62.f}, brush);
+    g.drawTextU("Ag", tf, {2.f, 2.f, 62.f, 62.f}, brush, kTextOptions);
     EXPECT_TRUE(checkResult("drawTextLarge", 2));
 }
 
@@ -51,7 +51,7 @@ TEST_F(DrawingTest, DrawTextMultiLine)
     auto tf = makeTextFormat(10.f);
     tf.setWordWrapping(WordWrapping::Wrap);
     auto brush = g.createSolidColorBrush(Colors::Black);
-    g.drawTextU("Line one\nLine two", tf, {2.f, 2.f, 62.f, 62.f}, brush);
+    g.drawTextU("Line one\nLine two", tf, {2.f, 2.f, 62.f, 62.f}, brush, kTextOptions);
     EXPECT_TRUE(checkResult("drawTextMultiLine", 40, 50.0)); // inconsistant smoothing, on same windows system
 }
 
@@ -64,7 +64,7 @@ TEST_F(DrawingTest, DrawTextColoured)
     auto tf = makeTextFormat(14.f);
     tf.setTextAlignment(TextAlignment::Center);
     tf.setParagraphAlignment(ParagraphAlignment::Center);
-    g.drawTextU("Test", tf, {0.f, 0.f, 64.f, 64.f}, textBrush);
+    g.drawTextU("Test", tf, {0.f, 0.f, 64.f, 64.f}, textBrush, kTextOptions);
     EXPECT_TRUE(checkResult("drawTextColoured", 2, 20.0));
 }
 
@@ -73,7 +73,7 @@ TEST_F(DrawingTest, EmptyStringText)
 {
     auto tf    = makeTextFormat(12.f);
     auto brush = g.createSolidColorBrush(Colors::Black);
-    g.drawTextU("", tf, {2.f, 2.f, 62.f, 62.f}, brush);
+    g.drawTextU("", tf, {2.f, 2.f, 62.f, 62.f}, brush, kTextOptions);
     EXPECT_TRUE(checkResult("emptyStringText", 2));
 }
 
@@ -90,7 +90,7 @@ TEST_F(DrawingTest, TextClippedByClipRect)
     auto brush = g.createSolidColorBrush(Colors::Black);
     // Only the top half of the bitmap is visible.
     g.pushAxisAlignedClip({0.f, 0.f, 64.f, 32.f});
-    g.drawTextU("Ag", tf, {0.f, 0.f, 64.f, 64.f}, brush);
+    g.drawTextU("Ag", tf, {0.f, 0.f, 64.f, 64.f}, brush, kTextOptions);
     g.popAxisAlignedClip();
     EXPECT_TRUE(checkResult("textClippedByClipRect", 2));
 }
@@ -102,7 +102,7 @@ TEST_F(DrawingTest, TextOverflowsLayoutRect)
     tf.setWordWrapping(WordWrapping::NoWrap);
     auto brush = g.createSolidColorBrush(Colors::Black);
     // Layout rect is narrow — text overflows on the right (no clip flag).
-    g.drawTextU("Overflow Right Edge", tf, {2.f, 22.f, 40.f, 42.f}, brush);
+    g.drawTextU("Overflow Right Edge", tf, {2.f, 22.f, 40.f, 42.f}, brush, kTextOptions);
     EXPECT_TRUE(checkResult("textOverflowsLayoutRect", 34, 15.0));
 }
 
@@ -113,7 +113,7 @@ TEST_F(DrawingTest, TextClippedByLayoutRect)
     tf.setWordWrapping(WordWrapping::NoWrap);
     auto brush = g.createSolidColorBrush(Colors::Black);
     // Same narrow rect, but Clip flag is set — text should be cut off.
-    g.drawTextU("ClipMe Right Edge", tf, {2.f, 22.f, 40.f, 42.f}, brush, DrawTextOptions::Clip);
+    g.drawTextU("ClipMe Right Edge", tf, {2.f, 22.f, 40.f, 42.f}, brush, DrawTextOptions::Clip | kTextOptions);
     EXPECT_TRUE(checkResult("textClippedByLayoutRect", 34, 15.0));
 }
 
@@ -123,7 +123,7 @@ TEST_F(DrawingTest, TextWrapOn)
     auto tf = makeTextFormat(11.f);
     tf.setWordWrapping(WordWrapping::Wrap);
     auto brush = g.createSolidColorBrush(Colors::Black);
-    g.drawTextU("The quick brown fox jumps", tf, {2.f, 2.f, 62.f, 62.f}, brush);
+    g.drawTextU("The quick brown fox jumps", tf, {2.f, 2.f, 62.f, 62.f}, brush, kTextOptions);
     EXPECT_TRUE(checkResult("textWrapOn", 34, 25.0));
 }
 
@@ -133,7 +133,7 @@ TEST_F(DrawingTest, TextWrapOff)
     auto tf = makeTextFormat(11.f);
     tf.setWordWrapping(WordWrapping::NoWrap);
     auto brush = g.createSolidColorBrush(Colors::Black);
-    g.drawTextU("The quick brown fox jumps", tf, {2.f, 2.f, 62.f, 62.f}, brush);
+    g.drawTextU("The quick brown fox jumps", tf, {2.f, 2.f, 62.f, 62.f}, brush, kTextOptions);
     EXPECT_TRUE(checkResult("textWrapOff", 2, 8.0));
 }
 
@@ -145,7 +145,7 @@ TEST_F(DrawingTest, TextClippedAtBottom)
     auto brush = g.createSolidColorBrush(Colors::Black);
     // Layout rect is only tall enough for 2 of the 4 lines.
     g.drawTextU("Line one\nLine two\nLine three\nLine four",
-                 tf, {2.f, 2.f, 62.f, 28.f}, brush);
+                 tf, {2.f, 2.f, 62.f, 28.f}, brush, kTextOptions);
     EXPECT_TRUE(checkResult("textClippedAtBottom", 10, 35.0));
 }
 
@@ -155,7 +155,7 @@ TEST_F(DrawingTest, DrawTextWhenBoundsTooShort)
     auto tf    = makeTextFormat(12.f);
     auto brush = g.createSolidColorBrush(Colors::Black);
     // Layout rect spans full width but is only 1 pixel tall.
-    g.drawTextU("small bounds", tf, {0.f, 32.f, 64.f, 33.f}, brush);
+    g.drawTextU("small bounds", tf, {0.f, 32.f, 64.f, 33.f}, brush, kTextOptions);
     EXPECT_TRUE(checkResult("drawTextWhenBoundsTooShort", 2));
 }
 
@@ -227,7 +227,7 @@ TEST_F(DrawingTest, FontMetricsVisual)
     auto textBrush = bigRT.createSolidColorBrush(Colors::Black);
     // Position layout rect so text baseline lands exactly at kBaselineY.
     const gmpi::drawing::Rect layoutRect{4.f, ascenderY, W, descenderY};
-    bigRT.drawTextU("Hfgx", tf, layoutRect, textBrush);
+    bigRT.drawTextU("Hfgx", tf, layoutRect, textBrush, kTextOptions);
 
     // ---- labels (small Arial, right-aligned, matching line colour) ----
     auto labelTF = makeTextFormat(9.f);
@@ -237,13 +237,13 @@ TEST_F(DrawingTest, FontMetricsVisual)
     const float labelX = W - labelW;
     auto labelY = [&](float lineY) { return lineY - labelFm.capHeight - 1.f; };
 
-    bigRT.drawTextU("ascender",    labelTF, {labelX, labelY(ascenderY),  W, ascenderY},  brushAsc);
-    bigRT.drawTextU("cap-height",  labelTF, {labelX, labelY(capY),       W, capY},       brushCap);
-    bigRT.drawTextU("x-height",    labelTF, {labelX, labelY(xhY),        W, xhY},        brushXH);
-    bigRT.drawTextU("baseline",    labelTF, {labelX, labelY(kBaselineY), W, kBaselineY}, brushBase);
-    bigRT.drawTextU("descender",   labelTF, {labelX, descenderY + 1.f,   W, descenderY + labelFm.ascent + 1.f}, brushDesc);
-    bigRT.drawTextU("underline",   labelTF, {labelX, labelY(underlineY), W, underlineY}, brushUL);
-    bigRT.drawTextU("strikethrough",labelTF,{labelX, labelY(strikeY),    W, strikeY},    brushST);
+    bigRT.drawTextU("ascender",    labelTF, {labelX, labelY(ascenderY),  W, ascenderY},  brushAsc, kTextOptions);
+    bigRT.drawTextU("cap-height",  labelTF, {labelX, labelY(capY),       W, capY},       brushCap, kTextOptions);
+    bigRT.drawTextU("x-height",    labelTF, {labelX, labelY(xhY),        W, xhY},        brushXH, kTextOptions);
+    bigRT.drawTextU("baseline",    labelTF, {labelX, labelY(kBaselineY), W, kBaselineY}, brushBase, kTextOptions);
+    bigRT.drawTextU("descender",   labelTF, {labelX, descenderY + 1.f,   W, descenderY + labelFm.ascent + 1.f}, brushDesc, kTextOptions);
+    bigRT.drawTextU("underline",   labelTF, {labelX, labelY(underlineY), W, underlineY}, brushUL, kTextOptions);
+    bigRT.drawTextU("strikethrough",labelTF,{labelX, labelY(strikeY),    W, strikeY},    brushST, kTextOptions);
 
     bigRT.endDraw();
     EXPECT_TRUE(checkBitmap("fontMetricsVisual", bigRT, 12, 12.0));
@@ -268,7 +268,7 @@ TEST_F(DrawingTest, MultilineDefaultSpacing)
 
     auto tf = makeTextFormat(24.f);
     auto brush = bigRT.createSolidColorBrush(Colors::Black);
-    bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 252.f}, brush);
+    bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 252.f}, brush, kTextOptions);
 
     bigRT.endDraw();
     EXPECT_TRUE(checkBitmap("multilineDefaultSpacing", bigRT, 2));
@@ -286,7 +286,7 @@ TEST_F(DrawingTest, MultilineLineHeight20)
     auto tf = makeTextFormat(24.f);
     tf.setLineSpacing(20.f, 16.f);   // tighter than default
     auto brush = bigRT.createSolidColorBrush(Colors::Black);
-    bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 252.f}, brush);
+    bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 252.f}, brush, kTextOptions);
 
     bigRT.endDraw();
     EXPECT_TRUE(checkBitmap("multilineLineHeight20", bigRT, 2));
@@ -302,7 +302,7 @@ TEST_F(DrawingTest, MultilineLineHeight30)
     auto tf = makeTextFormat(24.f);
     tf.setLineSpacing(30.f, 24.f);   // roughly default
     auto brush = bigRT.createSolidColorBrush(Colors::Black);
-    bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 252.f}, brush);
+    bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 252.f}, brush, kTextOptions);
 
     bigRT.endDraw();
     EXPECT_TRUE(checkBitmap("multilineLineHeight30", bigRT, 2));
@@ -318,7 +318,7 @@ TEST_F(DrawingTest, MultilineLineHeight40)
     auto tf = makeTextFormat(24.f);
     tf.setLineSpacing(40.f, 32.f);   // generous
     auto brush = bigRT.createSolidColorBrush(Colors::Black);
-    bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 252.f}, brush);
+    bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 252.f}, brush, kTextOptions);
 
     bigRT.endDraw();
     EXPECT_TRUE(checkBitmap("multilineLineHeight40", bigRT, 2));
@@ -334,7 +334,7 @@ TEST_F(DrawingTest, MultilineLineHeight60)
     auto tf = makeTextFormat(24.f);
     tf.setLineSpacing(60.f, 48.f);   // extra loose
     auto brush = bigRT.createSolidColorBrush(Colors::Black);
-    bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 252.f}, brush);
+    bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 252.f}, brush, kTextOptions);
 
     bigRT.endDraw();
     EXPECT_TRUE(checkBitmap("multilineLineHeight60", bigRT, 2));
@@ -352,7 +352,7 @@ TEST_F(DrawingTest, MultilineParagraphAlignNear)
     auto tf = makeTextFormat(24.f);
     tf.setParagraphAlignment(ParagraphAlignment::Near);
     auto brush = bigRT.createSolidColorBrush(Colors::Black);
-    bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 252.f}, brush);
+    bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 252.f}, brush, kTextOptions);
 
     bigRT.endDraw();
     EXPECT_TRUE(checkBitmap("multilineParagraphNear", bigRT, 2));
@@ -368,7 +368,7 @@ TEST_F(DrawingTest, MultilineParagraphAlignCenter)
     auto tf = makeTextFormat(24.f);
     tf.setParagraphAlignment(ParagraphAlignment::Center);
     auto brush = bigRT.createSolidColorBrush(Colors::Black);
-    bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 252.f}, brush);
+    bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 252.f}, brush, kTextOptions);
 
     bigRT.endDraw();
     EXPECT_TRUE(checkBitmap("multilineParagraphCenter", bigRT, 2));
@@ -384,7 +384,7 @@ TEST_F(DrawingTest, MultilineParagraphAlignFar)
     auto tf = makeTextFormat(24.f);
     tf.setParagraphAlignment(ParagraphAlignment::Far);
     auto brush = bigRT.createSolidColorBrush(Colors::Black);
-    bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 252.f}, brush);
+    bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 252.f}, brush, kTextOptions);
 
     bigRT.endDraw();
     EXPECT_TRUE(checkBitmap("multilineParagraphFar", bigRT, 2));
@@ -403,7 +403,7 @@ TEST_F(DrawingTest, MultilineParagraphCenterLineHeight40)
     tf.setLineSpacing(40.f, 32.f);
     tf.setParagraphAlignment(ParagraphAlignment::Center);
     auto brush = bigRT.createSolidColorBrush(Colors::Black);
-    bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 252.f}, brush);
+    bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 252.f}, brush, kTextOptions);
 
     bigRT.endDraw();
     EXPECT_TRUE(checkBitmap("multilineParagraphCenterLH40", bigRT, 2));
@@ -420,7 +420,7 @@ TEST_F(DrawingTest, MultilineParagraphFarLineHeight40)
     tf.setLineSpacing(40.f, 32.f);
     tf.setParagraphAlignment(ParagraphAlignment::Far);
     auto brush = bigRT.createSolidColorBrush(Colors::Black);
-    bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 252.f}, brush);
+    bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 252.f}, brush, kTextOptions);
 
     bigRT.endDraw();
     EXPECT_TRUE(checkBitmap("multilineParagraphFarLH40", bigRT, 2));
@@ -438,7 +438,7 @@ TEST_F(DrawingTest, MultilineTightRectDefaultSpacing)
     auto tf = makeTextFormat(24.f);
     auto brush = bigRT.createSolidColorBrush(Colors::Black);
     // Only ~50px tall — not enough for 3 lines at 24px body height.
-    bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 54.f}, brush);
+    bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 54.f}, brush, kTextOptions);
 
     bigRT.endDraw();
     EXPECT_TRUE(checkBitmap("multilineTightDefault", bigRT, 2));
@@ -455,7 +455,7 @@ TEST_F(DrawingTest, MultilineTightRectLineHeight40)
     tf.setLineSpacing(40.f, 32.f);
     auto brush = bigRT.createSolidColorBrush(Colors::Black);
     // Only ~76px tall — not enough for 3 lines at 40px line height.
-    bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 80.f}, brush);
+    bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 80.f}, brush, kTextOptions);
 
     bigRT.endDraw();
     EXPECT_TRUE(checkBitmap("multilineTightLH40", bigRT, 2));
@@ -473,7 +473,7 @@ TEST_F(DrawingTest, MultilineTightParagraphCenter)
     auto tf = makeTextFormat(24.f);
     tf.setParagraphAlignment(ParagraphAlignment::Center);
     auto brush = bigRT.createSolidColorBrush(Colors::Black);
-    bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 54.f}, brush);
+    bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 54.f}, brush, kTextOptions);
 
     bigRT.endDraw();
     EXPECT_TRUE(checkBitmap("multilineTightParagraphCenter", bigRT, 2));
@@ -489,7 +489,7 @@ TEST_F(DrawingTest, MultilineTightParagraphFar)
     auto tf = makeTextFormat(24.f);
     tf.setParagraphAlignment(ParagraphAlignment::Far);
     auto brush = bigRT.createSolidColorBrush(Colors::Black);
-    bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 54.f}, brush);
+    bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 54.f}, brush, kTextOptions);
 
     bigRT.endDraw();
     EXPECT_TRUE(checkBitmap("multilineTightParagraphFar", bigRT, 2));
@@ -508,7 +508,7 @@ TEST_F(DrawingTest, MultilineNarrowWrap)
     tf.setWordWrapping(WordWrapping::Wrap);
     auto brush = bigRT.createSolidColorBrush(Colors::Black);
     // Narrow width forces wrapping within each explicit line.
-    bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 100.f, 252.f}, brush);
+    bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 100.f, 252.f}, brush, kTextOptions);
 
     bigRT.endDraw();
     EXPECT_TRUE(checkBitmap("multilineNarrowWrap", bigRT, 2));
@@ -525,7 +525,7 @@ TEST_F(DrawingTest, MultilineNarrowWrapLineHeight40)
     tf.setWordWrapping(WordWrapping::Wrap);
     tf.setLineSpacing(40.f, 32.f);
     auto brush = bigRT.createSolidColorBrush(Colors::Black);
-    bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 100.f, 252.f}, brush);
+    bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 100.f, 252.f}, brush, kTextOptions);
 
     bigRT.endDraw();
     EXPECT_TRUE(checkBitmap("multilineNarrowWrapLH40", bigRT, 2));
@@ -584,7 +584,7 @@ TEST_F(DrawingTest, TextBaselines)
             Rect textRect{left, y - fm.ascent, right, y + fm.descent + 10.f};
 
             brush.setColor(Colors::Black);
-            bigRT.drawTextU(str, tf, textRect, brush, DrawTextOptions::NoSnap);
+            bigRT.drawTextU(str, tf, textRect, brush, DrawTextOptions::NoSnap | kTextOptions);
 
 			bigRT.popAxisAlignedClip();
 
@@ -701,9 +701,9 @@ TEST_F(DrawingTest, TextBaselines200)
             Rect snappedRect = textRect;
 
             if ((i % 10) == 9)
-                bigRT.drawTextU("L", tf, snappedRect, brush, DrawTextOptions::NoSnap);
+                bigRT.drawTextU("L", tf, snappedRect, brush, DrawTextOptions::NoSnap | kTextOptions);
             else
-                bigRT.drawTextU(str, tf, snappedRect, brush, DrawTextOptions::NoSnap);
+                bigRT.drawTextU(str, tf, snappedRect, brush, DrawTextOptions::NoSnap | kTextOptions);
 
             // Green tick at the predicted baseline.
             float predictedBaseLine = textRect.top + fm.ascent;
@@ -811,7 +811,7 @@ static int runBaselineLowestPixelTest(DrawingTestContext& drawingContext,
 
             auto brush = rt.createSolidColorBrush(Colors::Black);
             gmpi::drawing::Rect layoutRect{0.f, t, static_cast<float>(kW), b};
-            rt.drawTextU("L", tf, layoutRect, brush, DrawTextOptions::NoSnap);
+            rt.drawTextU("L", tf, layoutRect, brush, DrawTextOptions::NoSnap | kTextOptions);
             rt.endDraw();
 
             auto bmp    = rt.getBitmap();
@@ -1047,7 +1047,7 @@ TEST_F(DrawingTest, TextBaselineLowestPixel_CourierNew200)
 TEST_F(DrawingTest, RichTextPlain)
 {
     auto rtf = makeRichTextFormat("Hello", 12.f);
-    g.drawRichTextU(rtf, {2.f, 2.f, 62.f, 62.f}, g.createSolidColorBrush(Colors::Black));
+    g.drawRichTextU(rtf, {2.f, 2.f, 62.f, 62.f}, g.createSolidColorBrush(Colors::Black), kTextOptions);
     EXPECT_TRUE(checkResult("richTextPlain", 2));
 }
 
@@ -1055,7 +1055,7 @@ TEST_F(DrawingTest, RichTextPlain)
 TEST_F(DrawingTest, RichTextBold)
 {
     auto rtf = makeRichTextFormat("**Bold**", 12.f);
-    g.drawRichTextU(rtf, {2.f, 2.f, 62.f, 62.f}, g.createSolidColorBrush(Colors::Black));
+    g.drawRichTextU(rtf, {2.f, 2.f, 62.f, 62.f}, g.createSolidColorBrush(Colors::Black), kTextOptions);
     EXPECT_TRUE(checkResult("richTextBold", 2));
 }
 
@@ -1063,7 +1063,7 @@ TEST_F(DrawingTest, RichTextBold)
 TEST_F(DrawingTest, RichTextItalic)
 {
     auto rtf = makeRichTextFormat("*Italic*", 12.f);
-    g.drawRichTextU(rtf, {2.f, 2.f, 62.f, 62.f}, g.createSolidColorBrush(Colors::Black));
+    g.drawRichTextU(rtf, {2.f, 2.f, 62.f, 62.f}, g.createSolidColorBrush(Colors::Black), kTextOptions);
     EXPECT_TRUE(checkResult("richTextItalic", 40, 50.0));
 }
 
@@ -1071,7 +1071,7 @@ TEST_F(DrawingTest, RichTextItalic)
 TEST_F(DrawingTest, RichTextBoldItalic)
 {
     auto rtf = makeRichTextFormat("***BdIt***", 12.f);
-    g.drawRichTextU(rtf, {2.f, 2.f, 62.f, 62.f}, g.createSolidColorBrush(Colors::Black));
+    g.drawRichTextU(rtf, {2.f, 2.f, 62.f, 62.f}, g.createSolidColorBrush(Colors::Black), kTextOptions);
     EXPECT_TRUE(checkResult("richTextBoldItalic", 40, 50.0));
 }
 
@@ -1079,7 +1079,7 @@ TEST_F(DrawingTest, RichTextBoldItalic)
 TEST_F(DrawingTest, RichTextMixed)
 {
     auto rtf = makeRichTextFormat("Hi **bold** end", 12.f);
-    g.drawRichTextU(rtf, {2.f, 2.f, 62.f, 62.f}, g.createSolidColorBrush(Colors::Black));
+    g.drawRichTextU(rtf, {2.f, 2.f, 62.f, 62.f}, g.createSolidColorBrush(Colors::Black), kTextOptions);
     EXPECT_TRUE(checkResult("richTextMixed", 2));
 }
 
@@ -1088,7 +1088,7 @@ TEST_F(DrawingTest, RichTextCentred)
 {
     auto rtf = makeRichTextFormat("*Hi*", 12.f, "Arial",
         TextAlignment::Center, ParagraphAlignment::Center);
-    g.drawRichTextU(rtf, {0.f, 0.f, 64.f, 64.f}, g.createSolidColorBrush(Colors::Black));
+    g.drawRichTextU(rtf, {0.f, 0.f, 64.f, 64.f}, g.createSolidColorBrush(Colors::Black), kTextOptions);
     EXPECT_TRUE(checkResult("richTextCentred", 40, 50.0));
 }
 
@@ -1105,7 +1105,7 @@ TEST_F(DrawingTest, RichTextExtent)
 TEST_F(DrawingTest, RichTextHeading)
 {
     auto rtf = makeRichTextFormat("# Hi", 10.f);
-    g.drawRichTextU(rtf, {2.f, 2.f, 62.f, 62.f}, g.createSolidColorBrush(Colors::Black));
+    g.drawRichTextU(rtf, {2.f, 2.f, 62.f, 62.f}, g.createSolidColorBrush(Colors::Black), kTextOptions);
     EXPECT_TRUE(checkResult("richTextHeading", 2));
 }
 
@@ -1113,7 +1113,7 @@ TEST_F(DrawingTest, RichTextHeading)
 TEST_F(DrawingTest, RichTextBulletList)
 {
     auto rtf = makeRichTextFormat("- A\n- B", 10.f);
-    g.drawRichTextU(rtf, {2.f, 2.f, 62.f, 62.f}, g.createSolidColorBrush(Colors::Black));
+    g.drawRichTextU(rtf, {2.f, 2.f, 62.f, 62.f}, g.createSolidColorBrush(Colors::Black), kTextOptions);
     EXPECT_TRUE(checkResult("richTextBulletList", 2));
 }
 
@@ -1121,7 +1121,7 @@ TEST_F(DrawingTest, RichTextBulletList)
 TEST_F(DrawingTest, RichTextInlineCode)
 {
     auto rtf = makeRichTextFormat("`code`", 12.f);
-    g.drawRichTextU(rtf, {2.f, 2.f, 62.f, 62.f}, g.createSolidColorBrush(Colors::Black));
+    g.drawRichTextU(rtf, {2.f, 2.f, 62.f, 62.f}, g.createSolidColorBrush(Colors::Black), kTextOptions);
     EXPECT_TRUE(checkResult("richTextInlineCode", 2));
 }
 
@@ -1129,7 +1129,7 @@ TEST_F(DrawingTest, RichTextInlineCode)
 TEST_F(DrawingTest, RichTextStrikethrough)
 {
     auto rtf = makeRichTextFormat("~~no~~", 12.f);
-    g.drawRichTextU(rtf, {2.f, 2.f, 62.f, 62.f}, g.createSolidColorBrush(Colors::Black));
+    g.drawRichTextU(rtf, {2.f, 2.f, 62.f, 62.f}, g.createSolidColorBrush(Colors::Black), kTextOptions);
     EXPECT_TRUE(checkResult("richTextStrikethrough", 2));
 }
 
@@ -1137,6 +1137,6 @@ TEST_F(DrawingTest, RichTextStrikethrough)
 TEST_F(DrawingTest, RichTextMultiBlock)
 {
     auto rtf = makeRichTextFormat("## Hi\n\n- A\n- B", 7.f);
-    g.drawRichTextU(rtf, {1.f, 1.f, 63.f, 63.f}, g.createSolidColorBrush(Colors::Black));
+    g.drawRichTextU(rtf, {1.f, 1.f, 63.f, 63.f}, g.createSolidColorBrush(Colors::Black), kTextOptions);
     EXPECT_TRUE(checkResult("richTextMultiBlock", 2));
 }

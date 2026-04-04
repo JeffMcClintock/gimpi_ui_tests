@@ -31,6 +31,8 @@
 using namespace gmpi::drawing;
 using namespace gmpi::drawing::Colors;
 
+// Set DrawTextOptions::noMacSmooth to suppress Mac font smoothing (e.g. to compare against Windows references).
+static constexpr int32_t kTextOptions = DrawTextOptions::None;
 
 // ============================================================
 // DrawingTest fixture
