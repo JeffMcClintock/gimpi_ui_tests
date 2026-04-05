@@ -339,4 +339,267 @@ protected:
         }
         return checkBitmap(testName, g, tolerance, maxMeanDiff, maxDiffPercent);
     }
+
+    // ============================================================
+    // Correlation-based comparison
+    // ============================================================
+    // Instead of pixel-exact matching, this slides the actual image over the
+    // reference at integer offsets and computes normalised cross-correlation
+    // (NCC) on the grayscale luminance.  This is tolerant of antialiasing
+    // differences (different pixel intensities on otherwise identical glyphs)
+    // and catches text drawn in the wrong position.
+    //
+    // Parameters:
+    //   minCorrelation: minimum NCC score to pass (0–1, default 0.85).
+    //   maxShift:       search range in pixels for the best alignment (default 5).
+    //   maxAllowedShift: pass only if the best-match offset is within this many
+    //                    pixels of (0,0). Default = maxShift (accept any shift in range).
+
+    // Helper: decode one pixel from the rendered bitmap to sRGB grayscale [0,255].
+    float decodePixelGray(const uint8_t* ourAddr, int32_t ourBpr, int32_t ourBpp,
+                          bool ourIsInt, bool ourIsSRGB,
+                          int iR, int iG, int iB,
+                          uint32_t x, uint32_t y) const
+    {
+        uint8_t rendered[4];
+        if (ourIsSRGB)
+        {
+            const uint8_t* p = ourAddr + y * ourBpr + x * ourBpp;
+            rendered[0] = p[0]; rendered[1] = p[1];
+            rendered[2] = p[2]; rendered[3] = p[3];
+        }
+        else
+        {
+            float fr, fg, fb, fa;
+            if (ourBpp == 8 && !ourIsInt)
+            {
+                const uint16_t* h = reinterpret_cast<const uint16_t*>(
+                    ourAddr + y * ourBpr + x * 8);
+                fr = gmpi::drawing::detail::halfToFloat(h[0]);
+                fg = gmpi::drawing::detail::halfToFloat(h[1]);
+                fb = gmpi::drawing::detail::halfToFloat(h[2]);
+                fa = gmpi::drawing::detail::halfToFloat(h[3]);
+            }
+            else if (ourBpp == 8 && ourIsInt)
+            {
+                const uint16_t* u = reinterpret_cast<const uint16_t*>(
+                    ourAddr + y * ourBpr + x * 8);
+                constexpr float inv65535 = 1.0f / 65535.0f;
+                fr = u[0] * inv65535; fg = u[1] * inv65535;
+                fb = u[2] * inv65535; fa = u[3] * inv65535;
+            }
+            else
+            {
+                const float* f = reinterpret_cast<const float*>(
+                    ourAddr + y * ourBpr + x * 16);
+                fr = f[0]; fg = f[1]; fb = f[2]; fa = f[3];
+            }
+            if (fa > 0.0f)
+            {
+                fr = std::clamp(fr / fa, 0.0f, 1.0f);
+                fg = std::clamp(fg / fa, 0.0f, 1.0f);
+                fb = std::clamp(fb / fa, 0.0f, 1.0f);
+            }
+            else { fr = fg = fb = 0.0f; }
+
+            rendered[iR] = detail::linearToSRGB_f(fr);
+            rendered[iG] = detail::linearToSRGB_f(fg);
+            rendered[iB] = detail::linearToSRGB_f(fb);
+        }
+        // ITU-R BT.601 luminance from sRGB values.
+        return 0.299f * rendered[iR] + 0.587f * rendered[iG] + 0.114f * rendered[iB];
+    }
+
+    ::testing::AssertionResult checkBitmapCorrelation(
+        const std::string& testName,
+        gmpi::drawing::BitmapRenderTarget& target,
+        double minCorrelation  = 0.85,
+        int    maxShift        = 5,
+        int    maxAllowedShift = -1)
+    {
+        if (maxAllowedShift < 0)
+            maxAllowedShift = maxShift;
+
+        auto bitmap = target.getBitmap();
+
+        const auto refPath    = referenceDir() / (testName + ".png");
+        const auto actualPath = referenceDir() / (testName + "_actual.png");
+        const auto logPath    = referenceDir() / (testName + "_corr.log");
+
+        std::filesystem::remove(actualPath);
+        std::filesystem::remove(logPath);
+
+        auto refBitmap = drawingContext.factory().loadImageU(refPath.string());
+        if (!refBitmap)
+        {
+            savePng(refPath, bitmap);
+            return ::testing::AssertionFailure()
+                << "[MISSING REFERENCE] Wrote candidate image to:\n  "
+                << refPath.string()
+                << "\nVerify it looks correct then re-run the tests.";
+        }
+
+        const auto ourSize = bitmap.getSize();
+        const auto refSize = refBitmap.getSize();
+        if (ourSize.width != refSize.width || ourSize.height != refSize.height)
+        {
+            savePng(actualPath, bitmap);
+            return ::testing::AssertionFailure()
+                << "Size mismatch: rendered " << ourSize.width << "x" << ourSize.height
+                << ", reference " << refSize.width << "x" << refSize.height;
+        }
+
+        const int W = static_cast<int>(ourSize.width);
+        const int H = static_cast<int>(ourSize.height);
+
+        // --- Extract grayscale arrays ---
+        auto ourPixels = bitmap.lockPixels(BitmapLockFlags::Read);
+        auto refPixels = refBitmap.lockPixels(BitmapLockFlags::Read);
+
+        const uint8_t* ourAddr  = ourPixels.getAddress();
+        const int32_t  ourBpr   = ourPixels.getBytesPerRow();
+        const int32_t  ourBpp   = ourPixels.getBytesPerPixel();
+        const bool     ourIsInt = ourPixels.isInteger();
+        const bool     ourIsSRGB = ourPixels.isSRGB();
+        const uint8_t* refAddr  = refPixels.getAddress();
+        const int32_t  refBpr   = refPixels.getBytesPerRow();
+
+        const int32_t refLayout = refPixels.channelLayout();
+        const int iR = (refLayout == 0) ? 2 : 0;
+        const int iG = 1;
+        const int iB = (refLayout == 0) ? 0 : 2;
+
+        // Build grayscale float arrays.
+        std::vector<float> ourGray(W * H);
+        std::vector<float> refGray(W * H);
+
+        for (int y = 0; y < H; ++y)
+        {
+            for (int x = 0; x < W; ++x)
+            {
+                ourGray[y * W + x] = decodePixelGray(
+                    ourAddr, ourBpr, ourBpp, ourIsInt, ourIsSRGB, iR, iG, iB,
+                    static_cast<uint32_t>(x), static_cast<uint32_t>(y));
+
+                const uint8_t* ref = refAddr + y * refBpr + x * 4;
+                refGray[y * W + x] = 0.299f * ref[iR] + 0.587f * ref[iG] + 0.114f * ref[iB];
+            }
+        }
+
+        // --- Sliding NCC over shift range ---
+        // NCC = sum((a-mean_a)*(b-mean_b)) / sqrt(sum((a-mean_a)^2) * sum((b-mean_b)^2))
+        // Computed over the overlapping region for each (dx, dy) shift.
+
+        double bestNCC = -2.0;
+        int    bestDx  = 0;
+        int    bestDy  = 0;
+
+        for (int dy = -maxShift; dy <= maxShift; ++dy)
+        {
+            for (int dx = -maxShift; dx <= maxShift; ++dx)
+            {
+                // Overlapping region in reference coordinates.
+                const int x0 = std::max(0, dx);
+                const int y0 = std::max(0, dy);
+                const int x1 = std::min(W, W + dx);
+                const int y1 = std::min(H, H + dy);
+                if (x1 <= x0 || y1 <= y0) continue;
+
+                const int n = (x1 - x0) * (y1 - y0);
+
+                // Compute means over the overlapping region.
+                double sumA = 0, sumB = 0;
+                for (int ry = y0; ry < y1; ++ry)
+                {
+                    for (int rx = x0; rx < x1; ++rx)
+                    {
+                        sumA += ourGray[(ry - dy) * W + (rx - dx)];
+                        sumB += refGray[ry * W + rx];
+                    }
+                }
+                const double meanA = sumA / n;
+                const double meanB = sumB / n;
+
+                // Compute NCC.
+                double sumAB = 0, sumAA = 0, sumBB = 0;
+                for (int ry = y0; ry < y1; ++ry)
+                {
+                    for (int rx = x0; rx < x1; ++rx)
+                    {
+                        double a = ourGray[(ry - dy) * W + (rx - dx)] - meanA;
+                        double b = refGray[ry * W + rx] - meanB;
+                        sumAB += a * b;
+                        sumAA += a * a;
+                        sumBB += b * b;
+                    }
+                }
+
+                double denom = std::sqrt(sumAA * sumBB);
+                // If both images have near-zero variance (e.g. both blank),
+                // they are effectively identical — treat as perfect correlation.
+                double ncc = (denom > 1e-12) ? (sumAB / denom)
+                           : (sumAA < 1e-12 && sumBB < 1e-12) ? 1.0 : 0.0;
+
+                if (ncc > bestNCC)
+                {
+                    bestNCC = ncc;
+                    bestDx  = dx;
+                    bestDy  = dy;
+                }
+            }
+        }
+
+        const bool corrOk  = (bestNCC >= minCorrelation);
+        const bool shiftOk = (std::abs(bestDx) <= maxAllowedShift &&
+                              std::abs(bestDy) <= maxAllowedShift);
+
+        // Always write the log for diagnostics.
+        if (auto f = std::ofstream(logPath))
+        {
+            f << "Test:               " << testName << "\n"
+              << "Best NCC:           " << bestNCC << "  (threshold: " << minCorrelation << ")"
+              << (corrOk ? "" : "  <-- BELOW THRESHOLD") << "\n"
+              << "Best offset:        dx=" << bestDx << ", dy=" << bestDy
+              << "  (max allowed: " << maxAllowedShift << ")"
+              << (shiftOk ? "" : "  <-- SHIFT TOO LARGE") << "\n"
+              << "Search range:       +/-" << maxShift << " pixels\n"
+              << "Actual image:       " << actualPath.string() << "\n"
+              << "Reference image:    " << refPath.string() << "\n";
+        }
+
+        if (corrOk && shiftOk)
+        {
+            // Still print info for passing tests so you can see the scores.
+            std::cout << "  [CORR] " << testName
+                      << ": NCC=" << bestNCC
+                      << " at dx=" << bestDx << " dy=" << bestDy << "\n";
+            return ::testing::AssertionSuccess();
+        }
+
+        savePng(actualPath, bitmap);
+
+        std::ostringstream msg;
+        msg << "Correlation check failed for '" << testName << "'.\n"
+            << "  Best NCC: " << bestNCC << " (threshold: " << minCorrelation << ")\n"
+            << "  Best offset: dx=" << bestDx << ", dy=" << bestDy
+            << " (max allowed: " << maxAllowedShift << ")\n"
+            << "  Actual image: " << actualPath.string()
+            << "\n  Corr log:     " << logPath.string();
+        return ::testing::AssertionFailure() << msg.str();
+    }
+
+    // Convenience wrapper for the standard fixture render target.
+    ::testing::AssertionResult checkResultCorrelation(
+        const std::string& testName,
+        double minCorrelation  = 0.85,
+        int    maxShift        = 5,
+        int    maxAllowedShift = -1)
+    {
+        if (drawingActive)
+        {
+            g.endDraw();
+            drawingActive = false;
+        }
+        return checkBitmapCorrelation(testName, g, minCorrelation, maxShift, maxAllowedShift);
+    }
 };

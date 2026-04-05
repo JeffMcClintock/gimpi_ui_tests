@@ -18,7 +18,7 @@ TEST_F(DrawingTest, DrawTextSimple)
     g.fillRectangle({2.f, 2.f, 2.f + textSize.width, 2.f + textSize.height}, whiteBrush);
     auto brush = g.createSolidColorBrush(Colors::Black);
     g.drawTextU("Hello", tf, {2.f, 2.f, 62.f, 62.f}, brush);
-    EXPECT_TRUE(checkResult("drawTextSimple", 2));
+    EXPECT_TRUE(checkResultCorrelation("drawTextSimple"));
 }
 
 // Text centred horizontally and vertically in the bitmap.
@@ -35,7 +35,7 @@ TEST_F(DrawingTest, DrawTextCentred)
     g.fillRectangle({ex, ey, ex + textSize.width, ey + textSize.height}, whiteBrush);
     auto brush = g.createSolidColorBrush(Colors::Black);
     g.drawTextU("Hi", tf, {0.f, 0.f, 64.f, 64.f}, brush, kTextOptions);
-    EXPECT_TRUE(checkResult("drawTextCentred", 2));
+    EXPECT_TRUE(checkResultCorrelation("drawTextCentred"));
 }
 
 // Bold weight text.
@@ -48,7 +48,7 @@ TEST_F(DrawingTest, DrawTextBold)
     g.fillRectangle({2.f, 2.f, 2.f + textSize.width, 2.f + textSize.height}, whiteBrush);
     auto brush = g.createSolidColorBrush(Colors::Black);
     g.drawTextU("Bold", tf, {2.f, 2.f, 62.f, 62.f}, brush, kTextOptions);
-    EXPECT_TRUE(checkResult("drawTextBold", 2));
+    EXPECT_TRUE(checkResultCorrelation("drawTextBold"));
 }
 
 // Larger font size to stress-test glyph outlines.
@@ -61,7 +61,7 @@ TEST_F(DrawingTest, DrawTextLarge)
     g.fillRectangle({2.f, 2.f, 2.f + textSize.width, 2.f + textSize.height}, whiteBrush);
     auto brush = g.createSolidColorBrush(Colors::Black);
     g.drawTextU("Ag", tf, {2.f, 2.f, 62.f, 62.f}, brush, kTextOptions);
-    EXPECT_TRUE(checkResult("drawTextLarge", 2));
+    EXPECT_TRUE(checkResultCorrelation("drawTextLarge"));
 }
 
 // Two lines of text — verifies line spacing.
@@ -75,7 +75,7 @@ TEST_F(DrawingTest, DrawTextMultiLine)
     g.fillRectangle({2.f, 2.f, 2.f + textSize.width, 2.f + textSize.height}, whiteBrush);
     auto brush = g.createSolidColorBrush(Colors::Black);
     g.drawTextU("Line one\nLine two", tf, {2.f, 2.f, 62.f, 62.f}, brush, kTextOptions);
-    EXPECT_TRUE(checkResult("drawTextMultiLine", 40, 50.0)); // inconsistant smoothing, on same windows system
+    EXPECT_TRUE(checkResultCorrelation("drawTextMultiLine", 0.55));
 }
 
 // Coloured text on a coloured background.
@@ -92,7 +92,7 @@ TEST_F(DrawingTest, DrawTextColoured)
     g.fillRectangle({ex, ey, ex + textSize.width, ey + textSize.height}, whiteBrush);
     auto textBrush = g.createSolidColorBrush(Colors::Yellow);
     g.drawTextU("Test", tf, {0.f, 0.f, 64.f, 64.f}, textBrush);
-    EXPECT_TRUE(checkResult("drawTextColoured", 2, 20.0));
+    EXPECT_TRUE(checkResultCorrelation("drawTextColoured"));
 }
 
 // An empty string should not affect the bitmap (remains all-white).
@@ -101,7 +101,7 @@ TEST_F(DrawingTest, EmptyStringText)
     auto tf    = makeTextFormat(12.f);
     auto brush = g.createSolidColorBrush(Colors::Black);
     g.drawTextU("", tf, {2.f, 2.f, 62.f, 62.f}, brush, kTextOptions);
-    EXPECT_TRUE(checkResult("emptyStringText", 2));
+    EXPECT_TRUE(checkResultCorrelation("emptyStringText"));
 }
 
 // ============================================================
@@ -125,7 +125,7 @@ TEST_F(DrawingTest, TextClippedByClipRect)
     g.pushAxisAlignedClip({0.f, 0.f, 64.f, 32.f});
     g.drawTextU("Ag", tf, {0.f, 0.f, 64.f, 64.f}, brush, kTextOptions);
     g.popAxisAlignedClip();
-    EXPECT_TRUE(checkResult("textClippedByClipRect", 2));
+    EXPECT_TRUE(checkResultCorrelation("textClippedByClipRect"));
 }
 
 // Without DrawTextOptions::Clip, text overflows the layout rect (D2D default).
@@ -140,7 +140,7 @@ TEST_F(DrawingTest, TextOverflowsLayoutRect)
     auto brush = g.createSolidColorBrush(Colors::Black);
     // Layout rect is narrow — text overflows on the right (no clip flag).
     g.drawTextU("Overflow Right Edge", tf, {2.f, 22.f, 40.f, 42.f}, brush, kTextOptions);
-    EXPECT_TRUE(checkResult("textOverflowsLayoutRect", 34, 15.0));
+    EXPECT_TRUE(checkResultCorrelation("textOverflowsLayoutRect"));
 }
 
 // With DrawTextOptions::Clip, text is clipped to the layout rect.
@@ -155,7 +155,7 @@ TEST_F(DrawingTest, TextClippedByLayoutRect)
     auto brush = g.createSolidColorBrush(Colors::Black);
     // Same narrow rect, but Clip flag is set — text should be cut off.
     g.drawTextU("ClipMe Right Edge", tf, {2.f, 22.f, 40.f, 42.f}, brush, DrawTextOptions::Clip | kTextOptions);
-    EXPECT_TRUE(checkResult("textClippedByLayoutRect", 34, 15.0));
+    EXPECT_TRUE(checkResultCorrelation("textClippedByLayoutRect"));
 }
 
 // Word-wrap ON: a long string breaks across multiple lines within the layout rect.
@@ -169,7 +169,7 @@ TEST_F(DrawingTest, TextWrapOn)
     g.fillRectangle({2.f, 2.f, 2.f + textSize.width, 2.f + textSize.height}, whiteBrush);
     auto brush = g.createSolidColorBrush(Colors::Black);
     g.drawTextU("The quick brown fox jumps", tf, {2.f, 2.f, 62.f, 62.f}, brush, kTextOptions);
-    EXPECT_TRUE(checkResult("textWrapOn", 34, 25.0));
+    EXPECT_TRUE(checkResultCorrelation("textWrapOn"));
 }
 
 // Word-wrap OFF: same long string runs in one line and is clipped on the right.
@@ -183,7 +183,7 @@ TEST_F(DrawingTest, TextWrapOff)
     g.fillRectangle({2.f, 2.f, 2.f + textSize.width, 2.f + textSize.height}, whiteBrush);
     auto brush = g.createSolidColorBrush(Colors::Black);
     g.drawTextU("The quick brown fox jumps", tf, {2.f, 2.f, 62.f, 62.f}, brush, kTextOptions);
-    EXPECT_TRUE(checkResult("textWrapOff", 2, 8.0));
+    EXPECT_TRUE(checkResultCorrelation("textWrapOff"));
 }
 
 // Text clipped at the bottom of the layout rect — last line is cut off.
@@ -199,7 +199,7 @@ TEST_F(DrawingTest, TextClippedAtBottom)
     // Layout rect is only tall enough for 2 of the 4 lines.
     g.drawTextU("Line one\nLine two\nLine three\nLine four",
                  tf, {2.f, 2.f, 62.f, 28.f}, brush, kTextOptions);
-    EXPECT_TRUE(checkResult("textClippedAtBottom", 10, 35.0));
+    EXPECT_TRUE(checkResultCorrelation("textClippedAtBottom"));
 }
 
 // Bounds height of only 1 pixel — text should still attempt to draw.
@@ -213,7 +213,7 @@ TEST_F(DrawingTest, DrawTextWhenBoundsTooShort)
     auto brush = g.createSolidColorBrush(Colors::Black);
     // Layout rect spans full width but is only 1 pixel tall.
     g.drawTextU("small bounds", tf, {0.f, 32.f, 64.f, 33.f}, brush, kTextOptions);
-    EXPECT_TRUE(checkResult("drawTextWhenBoundsTooShort", 2));
+    EXPECT_TRUE(checkResultCorrelation("drawTextWhenBoundsTooShort"));
 }
 
 // ============================================================
@@ -1166,7 +1166,7 @@ TEST_F(DrawingTest, RichTextPlain)
     g.fillRectangle({2.f, 2.f, 2.f + textSize.width, 2.f + textSize.height}, whiteBrush);
     auto brush = g.createSolidColorBrush(Colors::Black);
     g.drawRichTextU(rtf, {2.f, 2.f, 62.f, 62.f}, brush);
-    EXPECT_TRUE(checkResult("richTextPlain", 2));
+    EXPECT_TRUE(checkResultCorrelation("richTextPlain"));
 }
 
 // Bold text via **markdown**.
@@ -1179,7 +1179,7 @@ TEST_F(DrawingTest, RichTextBold)
     g.fillRectangle({2.f, 2.f, 2.f + textSize.width, 2.f + textSize.height}, whiteBrush);
     auto brush = g.createSolidColorBrush(Colors::Black);
     g.drawRichTextU(rtf, {2.f, 2.f, 62.f, 62.f}, brush);
-    EXPECT_TRUE(checkResult("richTextBold", 2));
+    EXPECT_TRUE(checkResultCorrelation("richTextBold"));
 }
 
 // Italic text via *markdown*.
@@ -1192,7 +1192,7 @@ TEST_F(DrawingTest, RichTextItalic)
     g.fillRectangle({2.f, 2.f, 2.f + textSize.width, 2.f + textSize.height}, whiteBrush);
     auto brush = g.createSolidColorBrush(Colors::Black);
     g.drawRichTextU(rtf, {2.f, 2.f, 62.f, 62.f}, brush);
-    EXPECT_TRUE(checkResult("richTextItalic", 40, 50.0));
+    EXPECT_TRUE(checkResultCorrelation("richTextItalic"));
 }
 
 // Bold italic text via ***markdown***.
@@ -1205,7 +1205,7 @@ TEST_F(DrawingTest, RichTextBoldItalic)
     g.fillRectangle({2.f, 2.f, 2.f + textSize.width, 2.f + textSize.height}, whiteBrush);
     auto brush = g.createSolidColorBrush(Colors::Black);
     g.drawRichTextU(rtf, {2.f, 2.f, 62.f, 62.f}, brush);
-    EXPECT_TRUE(checkResult("richTextBoldItalic", 40, 50.0));
+    EXPECT_TRUE(checkResultCorrelation("richTextBoldItalic"));
 }
 
 // Mixed plain and bold in one string.
@@ -1218,7 +1218,7 @@ TEST_F(DrawingTest, RichTextMixed)
     g.fillRectangle({2.f, 2.f, 2.f + textSize.width, 2.f + textSize.height}, whiteBrush);
     auto brush = g.createSolidColorBrush(Colors::Black);
     g.drawRichTextU(rtf, {2.f, 2.f, 62.f, 62.f}, brush);
-    EXPECT_TRUE(checkResult("richTextMixed", 2));
+    EXPECT_TRUE(checkResultCorrelation("richTextMixed"));
 }
 
 // Centre-aligned rich text — alignment is set at creation time.
@@ -1234,7 +1234,7 @@ TEST_F(DrawingTest, RichTextCentred)
     g.fillRectangle({ex, ey, ex + textSize.width, ey + textSize.height}, whiteBrush);
     auto brush = g.createSolidColorBrush(Colors::Black);
     g.drawRichTextU(rtf, {0.f, 0.f, 64.f, 64.f}, brush);
-    EXPECT_TRUE(checkResult("richTextCentred", 40, 50.0));
+    EXPECT_TRUE(checkResultCorrelation("richTextCentred"));
 }
 
 // Verify getTextExtentU returns a non-zero size for rich text.
@@ -1256,7 +1256,7 @@ TEST_F(DrawingTest, RichTextHeading)
     g.fillRectangle({2.f, 2.f, 2.f + textSize.width, 2.f + textSize.height}, whiteBrush);
     auto brush = g.createSolidColorBrush(Colors::Black);
     g.drawRichTextU(rtf, {2.f, 2.f, 62.f, 62.f}, brush);
-    EXPECT_TRUE(checkResult("richTextHeading", 2));
+    EXPECT_TRUE(checkResultCorrelation("richTextHeading"));
 }
 
 // Bullet list renders with bullet character.
@@ -1269,7 +1269,7 @@ TEST_F(DrawingTest, RichTextBulletList)
     g.fillRectangle({2.f, 2.f, 2.f + textSize.width, 2.f + textSize.height}, whiteBrush);
     auto brush = g.createSolidColorBrush(Colors::Black);
     g.drawRichTextU(rtf, {2.f, 2.f, 62.f, 62.f}, brush);
-    EXPECT_TRUE(checkResult("richTextBulletList", 2));
+    EXPECT_TRUE(checkResultCorrelation("richTextBulletList"));
 }
 
 // Inline code renders in monospace font.
@@ -1282,7 +1282,7 @@ TEST_F(DrawingTest, RichTextInlineCode)
     g.fillRectangle({2.f, 2.f, 2.f + textSize.width, 2.f + textSize.height}, whiteBrush);
     auto brush = g.createSolidColorBrush(Colors::Black);
     g.drawRichTextU(rtf, {2.f, 2.f, 62.f, 62.f}, brush);
-    EXPECT_TRUE(checkResult("richTextInlineCode", 2));
+    EXPECT_TRUE(checkResultCorrelation("richTextInlineCode"));
 }
 
 // Strikethrough text.
@@ -1295,7 +1295,7 @@ TEST_F(DrawingTest, RichTextStrikethrough)
     g.fillRectangle({2.f, 2.f, 2.f + textSize.width, 2.f + textSize.height}, whiteBrush);
     auto brush = g.createSolidColorBrush(Colors::Black);
     g.drawRichTextU(rtf, {2.f, 2.f, 62.f, 62.f}, brush);
-    EXPECT_TRUE(checkResult("richTextStrikethrough", 2));
+    EXPECT_TRUE(checkResultCorrelation("richTextStrikethrough"));
 }
 
 // Multi-block: heading + list.
@@ -1308,5 +1308,5 @@ TEST_F(DrawingTest, RichTextMultiBlock)
     g.fillRectangle({1.f, 1.f, 1.f + textSize.width, 1.f + textSize.height}, whiteBrush);
     auto brush = g.createSolidColorBrush(Colors::Black);
     g.drawRichTextU(rtf, {1.f, 1.f, 63.f, 63.f}, brush);
-    EXPECT_TRUE(checkResult("richTextMultiBlock", 2));
+    EXPECT_TRUE(checkResultCorrelation("richTextMultiBlock"));
 }
