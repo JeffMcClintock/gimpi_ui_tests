@@ -126,7 +126,7 @@ TEST_F(DrawingTest, BitmapBrushFillEllipse)
 TEST_F(DrawingTest, BitmapBrushText)
 {
     auto brush = makeCheckerboardBrush(Colors::DarkBlue, Colors::Cyan);
-    auto tf    = makeTextFormat(24.f);
+    auto tf = makeTextFormat(48.f);
     tf.setTextAlignment(TextAlignment::Center);
     tf.setParagraphAlignment(ParagraphAlignment::Center);
     g.drawTextU("Ag", tf, {0.f, 0.f, 64.f, 64.f}, brush, kTextOptions);
@@ -166,7 +166,7 @@ TEST_F(DrawingTest, LinearGradientText)
         {1.f, Colors::Blue},
     }};
     auto brush = g.createLinearGradientBrush(stops, {0.f, 0.f}, {64.f, 0.f});
-    auto tf = makeTextFormat(24.f);
+    auto tf = makeTextFormat(48.f);
     tf.setTextAlignment(TextAlignment::Center);
     tf.setParagraphAlignment(ParagraphAlignment::Center);
     g.drawTextU("Ag", tf, {0.f, 0.f, 64.f, 64.f}, brush, kTextOptions);
@@ -178,7 +178,7 @@ TEST_F(DrawingTest, RadialGradientText)
 {
     auto brush = g.createRadialGradientBrush(
         {32.f, 32.f}, 32.f, Colors::Yellow, Colors::DarkRed);
-    auto tf = makeTextFormat(24.f);
+    auto tf = makeTextFormat(48.f);
     tf.setTextAlignment(TextAlignment::Center);
     tf.setParagraphAlignment(ParagraphAlignment::Center);
     g.drawTextU("Ag", tf, {0.f, 0.f, 64.f, 64.f}, brush, kTextOptions);
@@ -225,7 +225,7 @@ TEST_F(DrawingTest, TransparentText)
     auto bgBrush   = g.createSolidColorBrush(Colors::Tomato);
     auto textBrush = g.createSolidColorBrush(colorFromHex(0xFFFFFFu, 0.6f)); // 60% white
     g.fillRectangle({0.f, 0.f, 64.f, 64.f}, bgBrush);
-    auto tf = makeTextFormat(24.f);
+    auto tf = makeTextFormat(46.f, "Arial", FontWeight::Regular, FontStyle::Normal, FontStretch::Normal, FontFlags::BodyHeight);
     tf.setTextAlignment(TextAlignment::Center);
     tf.setParagraphAlignment(ParagraphAlignment::Center);
     g.drawTextU("Ag", tf, {0.f, 0.f, 64.f, 64.f}, textBrush, kTextOptions);
@@ -856,13 +856,14 @@ TEST_F(DrawingTest, ColourRoundTrip)
 // Black text on white with a soft drop shadow behind it.
 TEST_F(DrawingTest, BlurTextShadow)
 {
+    const char* text = "Shadow";
     constexpr uint32_t kW = 128, kH = 64;
     auto factory = g.getFactory();
     auto bigRT = factory.createCpuRenderTarget({kW, kH}, kRenderFlags);
     bigRT.beginDraw();
     bigRT.clear(Colors::White);
 
-    auto tf = makeTextFormat(20.f);
+    auto tf = makeTextFormat(30.f);
 
     const gmpi::drawing::Rect textRect{10.f, 14.f, 120.f, 50.f};
     constexpr float shadowOffX = 2.f, shadowOffY = 2.f;
@@ -873,14 +874,14 @@ TEST_F(DrawingTest, BlurTextShadow)
     shadow.tint = Color{0.f, 0.f, 0.f, 1.f}; // black
     shadow.draw(bigRT, bounds, [&](Graphics& mask) {
         auto brush = mask.createSolidColorBrush(Colors::White);
-        mask.drawTextU("Shadow", tf,
+        mask.drawTextU(text, tf,
             {textRect.left + shadowOffX, textRect.top + shadowOffY,
              textRect.right + shadowOffX, textRect.bottom + shadowOffY}, brush, kTextOptions);
     });
 
     // Draw crisp text on top.
     auto textBrush = bigRT.createSolidColorBrush(Colors::Black);
-    bigRT.drawTextU("Shadow", tf, textRect, textBrush, kTextOptions);
+    bigRT.drawTextU(text, tf, textRect, textBrush, kTextOptions);
 
     bigRT.endDraw();
     EXPECT_TRUE(checkBitmap("blurTextShadow", bigRT, 2));
@@ -889,13 +890,14 @@ TEST_F(DrawingTest, BlurTextShadow)
 // Lime text on black with a glowing halo.
 TEST_F(DrawingTest, BlurTextGlow)
 {
+	const char* text = "Glow";
     constexpr uint32_t kW = 128, kH = 64;
     auto factory = g.getFactory();
     auto bigRT = factory.createCpuRenderTarget({kW, kH}, kRenderFlags);
     bigRT.beginDraw();
     bigRT.clear(Colors::Black);
 
-    auto tf = makeTextFormat(20.f);
+    auto tf = makeTextFormat(32.f);
 
     const gmpi::drawing::Rect textRect{10.f, 14.f, 120.f, 50.f};
     const gmpi::drawing::Rect bounds{0.f, 0.f, static_cast<float>(kW), static_cast<float>(kH)};
@@ -905,12 +907,12 @@ TEST_F(DrawingTest, BlurTextGlow)
     glow.tint = Colors::Lime;
     glow.draw(bigRT, bounds, [&](Graphics& mask) {
         auto brush = mask.createSolidColorBrush(Colors::White);
-        mask.drawTextU("Glow", tf, textRect, brush, kTextOptions);
+        mask.drawTextU(text, tf, textRect, brush, kTextOptions);
     });
 
     // Draw crisp text on top.
     auto textBrush = bigRT.createSolidColorBrush(Colors::Lime);
-    bigRT.drawTextU("Glow", tf, textRect, textBrush, kTextOptions);
+    bigRT.drawTextU(text, tf, textRect, textBrush, kTextOptions);
 
     bigRT.endDraw();
     EXPECT_TRUE(checkBitmap("blurTextGlow", bigRT, 2));

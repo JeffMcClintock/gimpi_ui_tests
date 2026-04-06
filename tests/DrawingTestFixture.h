@@ -79,10 +79,11 @@ protected:
         const char*        family  = "Arial",
         FontWeight         weight  = FontWeight::Regular,
         FontStyle          style   = FontStyle::Normal,
-        FontStretch        stretch = FontStretch::Normal)
+        FontStretch        stretch = FontStretch::Normal,
+        FontFlags          flags   = FontFlags::BodyHeight)
     {
         std::string_view familySv{family};
-        return drawingContext.factory().createTextFormat(height, {&familySv, 1}, weight, style, stretch);
+        return drawingContext.factory().createTextFormat(height, {&familySv, 1}, weight, style, stretch, flags);
     }
 
     // Create a RichTextFormat via the wrapper factory.
