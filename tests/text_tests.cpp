@@ -1372,6 +1372,8 @@ TEST_F(DrawingTest, TextBaselineGrid)
         auto tf = makeTextFormat(fontSize);
         tf.setWordWrapping(WordWrapping::NoWrap);
 
+        auto textSize = tf.getTextExtentU("E");
+
         const float x = col * colWidth;
         float y = 2.f;
 
@@ -1382,7 +1384,6 @@ TEST_F(DrawingTest, TextBaselineGrid)
             // Light horizontal guide line at each row's baseline.
             bigRT.drawLine({x, subPixelY}, {x + colWidth - 2.f, subPixelY}, guideBrush, 0.5f);
 
-            auto textSize = tf.getTextExtentU("E");
             gmpi::drawing::Rect layoutRect{x + 1.f, subPixelY, x + colWidth - 1.f, subPixelY + textSize.height};
             bigRT.drawTextU("E", tf, layoutRect, brush, kTextOptions);
 
