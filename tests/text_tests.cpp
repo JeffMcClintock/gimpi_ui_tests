@@ -1342,3 +1342,98 @@ TEST_F(DrawingTest, RichTextMultiBlock)
     g.drawRichTextU(rtf, {1.f, 1.f, 63.f, 63.f}, brush);
     EXPECT_TRUE(checkResultCorrelation("richTextMultiBlock"));
 }
+
+// ============================================================
+// Text baseline test — "E" at various font sizes and sub-pixel y offsets
+// ============================================================
+// Draws columns of "E" at different font sizes (8, 12, 16, 20, 24, 32),
+// each column with rows shifted by fractional sub-pixel y offsets (0.0 to 0.9).
+// This stresses glyph rasterisation at every snap boundary and exposes
+// hinting / antialiasing inconsistencies across platforms.
+TEST_F(DrawingTest, TextBaselineGrid)
+{
+    constexpr uint32_t kW = 256, kH = 256;
+
+    auto bigRT = drawingContext.factory().createCpuRenderTarget({kW, kH}, kRenderFlags);
+    bigRT.beginDraw();
+    bigRT.clear(Colors::White);
+
+    auto brush = bigRT.createSolidColorBrush(Colors::Black);
+    auto guideBrush = bigRT.createSolidColorBrush(Color{0.85f, 0.85f, 0.85f, 1.0f});
+
+    constexpr float fontSizes[] = {8.f, 12.f, 16.f, 20.f, 24.f, 32.f};
+    constexpr int   nSizes = sizeof(fontSizes) / sizeof(fontSizes[0]);
+    constexpr int   nSteps = 10;  // sub-pixel offsets 0.0 .. 0.9
+    constexpr float colWidth = static_cast<float>(kW) / nSizes;
+
+    for (int col = 0; col < nSizes; ++col)
+    {
+        const float fontSize = fontSizes[col];
+        auto tf = makeTextFormat(fontSize);
+        tf.setWordWrapping(WordWrapping::NoWrap);
+
+        const float x = col * colWidth;
+        float y = 2.f;
+
+        for (int step = 0; step < nSteps; ++step)
+        {
+            const float subPixelY = y + step * 0.1f;
+
+            // Light horizontal guide line at each row's baseline.
+            bigRT.drawLine({x, subPixelY}, {x + colWidth - 2.f, subPixelY}, guideBrush, 0.5f);
+
+            auto textSize = tf.getTextExtentU("E");
+            gmpi::drawing::Rect layoutRect{x + 1.f, subPixelY, x + colWidth - 1.f, subPixelY + textSize.height};
+            bigRT.drawTextU("E", tf, layoutRect, brush, kTextOptions);
+
+            y += textSize.height + 2.f;
+        }
+    }
+
+    bigRT.endDraw();
+    EXPECT_TRUE(checkBitmapCorrelation("textBaselineGrid", bigRT));
+}
+
+// Same as TextBaselineGrid but with FontFlags::BodyHeight enabled.
+TEST_F(DrawingTest, TextBaselineGridBodyHeight)
+{
+    constexpr uint32_t kW = 256, kH = 256;
+
+    auto bigRT = drawingContext.factory().createCpuRenderTarget({kW, kH}, kRenderFlags);
+    bigRT.beginDraw();
+    bigRT.clear(Colors::White);
+
+    auto brush = bigRT.createSolidColorBrush(Colors::Black);
+    auto guideBrush = bigRT.createSolidColorBrush(Color{0.85f, 0.85f, 0.85f, 1.0f});
+
+    constexpr float fontSizes[] = {8.f, 12.f, 16.f, 20.f, 24.f, 32.f};
+    constexpr int   nSizes = sizeof(fontSizes) / sizeof(fontSizes[0]);
+    constexpr int   nSteps = 10;
+    constexpr float colWidth = static_cast<float>(kW) / nSizes;
+
+    for (int col = 0; col < nSizes; ++col)
+    {
+        const float fontSize = fontSizes[col];
+        auto tf = makeTextFormat(fontSize, "Arial", FontWeight::Regular, FontStyle::Normal, FontStretch::Normal, FontFlags::BodyHeight);
+        tf.setWordWrapping(WordWrapping::NoWrap);
+
+        const float x = col * colWidth;
+        float y = 2.f;
+
+        for (int step = 0; step < nSteps; ++step)
+        {
+            const float subPixelY = y + step * 0.1f;
+
+            bigRT.drawLine({x, subPixelY}, {x + colWidth - 2.f, subPixelY}, guideBrush, 0.5f);
+
+            auto textSize = tf.getTextExtentU("E");
+            gmpi::drawing::Rect layoutRect{x + 1.f, subPixelY, x + colWidth - 1.f, subPixelY + textSize.height};
+            bigRT.drawTextU("E", tf, layoutRect, brush, kTextOptions);
+
+            y += textSize.height + 2.f;
+        }
+    }
+
+    bigRT.endDraw();
+    EXPECT_TRUE(checkBitmapCorrelation("textBaselineGridBodyHeight", bigRT));
+}
