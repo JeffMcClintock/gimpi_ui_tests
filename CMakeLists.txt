@@ -48,15 +48,21 @@ if(APPLE)
     add_executable(gmpi_ui_tests
         tests/drawing_tests.cpp
         tests/text_tests.cpp
+        tests/layout_tests.cpp
         tests/DrawingTestContext.mm
         ${GMPI_UI_SDK}/backends/DirectXGfx.cpp
+        ${GMPI_UI_SDK}/experimental/grid.cpp
+        ${GMPI_UI_SDK}/experimental/ui_facades.cpp
     )
 else()
     add_executable(gmpi_ui_tests
         tests/drawing_tests.cpp
         tests/text_tests.cpp
+        tests/layout_tests.cpp
         tests/DrawingTestContext.cpp
         ${GMPI_UI_SDK}/backends/DirectXGfx.cpp
+        ${GMPI_UI_SDK}/experimental/grid.cpp
+        ${GMPI_UI_SDK}/experimental/ui_facades.cpp
     )
 endif()
 
@@ -69,6 +75,7 @@ file(GLOB GMPI_UI_HEADERS
     ${GMPI_UI_SDK}/*.h
     ${GMPI_UI_SDK}/backends/*.h
     ${GMPI_UI_SDK}/helpers/*.h
+    ${GMPI_UI_SDK}/experimental/*.h
 )
 target_sources(gmpi_ui_tests PRIVATE
     tests/DrawingTestFixture.h
