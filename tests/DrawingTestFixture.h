@@ -203,11 +203,39 @@ protected:
             for (uint32_t x = 0; x < ourSize.width; ++x)
             {
                 uint8_t rendered[4];
+                const uint8_t* p = ourAddr + y * ourBpr + x * ourBpp;
 
-                if (ourIsSRGB)
+                if (ourBpp == 4)
+                {
+                    // 32bppPBGRA: linear premultiplied BGRA 8-bit (e.g. from a
+                    // render target created with the SRGBPixels flag — despite
+                    // the flag name the byte values are LINEAR; SavePng.h:114
+                    // documents the same).  Decode through the same pipeline
+                    // as the high-precision formats: un-premultiply, then
+                    // linear -> sRGB to match the reference's encoding.
+                    constexpr float inv255 = 1.0f / 255.0f;
+                    float fb = p[0] * inv255;
+                    float fg = p[1] * inv255;
+                    float fr = p[2] * inv255;
+                    float fa = p[3] * inv255;
+
+                    uint8_t a = static_cast<uint8_t>(std::clamp(fa * 255.0f + 0.5f, 0.0f, 255.0f));
+                    if (fa > 0.0f)
+                    {
+                        fr = std::clamp(fr / fa, 0.0f, 1.0f);
+                        fg = std::clamp(fg / fa, 0.0f, 1.0f);
+                        fb = std::clamp(fb / fa, 0.0f, 1.0f);
+                    }
+                    else { fr = fg = fb = 0.0f; }
+
+                    rendered[iR] = detail::linearToSRGB_f(fr);
+                    rendered[iG] = detail::linearToSRGB_f(fg);
+                    rendered[iB] = detail::linearToSRGB_f(fb);
+                    rendered[iA] = a;
+                }
+                else if (ourIsSRGB)
                 {
                     // Already sRGB — channel order matches reference. Copy directly.
-                    const uint8_t* p = ourAddr + y * ourBpr + x * ourBpp;
                     rendered[0] = p[0]; rendered[1] = p[1];
                     rendered[2] = p[2]; rendered[3] = p[3];
                 }
@@ -363,9 +391,32 @@ protected:
                           uint32_t x, uint32_t y) const
     {
         uint8_t rendered[4];
-        if (ourIsSRGB)
+        const uint8_t* p = ourAddr + y * ourBpr + x * ourBpp;
+
+        if (ourBpp == 4)
         {
-            const uint8_t* p = ourAddr + y * ourBpr + x * ourBpp;
+            // 32bppPBGRA: linear premultiplied BGRA 8-bit. Mirror checkBitmap's
+            // 4bpp path so correlation comparisons agree with pixel comparisons.
+            constexpr float inv255 = 1.0f / 255.0f;
+            float fb = p[0] * inv255;
+            float fg = p[1] * inv255;
+            float fr = p[2] * inv255;
+            float fa = p[3] * inv255;
+
+            if (fa > 0.0f)
+            {
+                fr = std::clamp(fr / fa, 0.0f, 1.0f);
+                fg = std::clamp(fg / fa, 0.0f, 1.0f);
+                fb = std::clamp(fb / fa, 0.0f, 1.0f);
+            }
+            else { fr = fg = fb = 0.0f; }
+
+            rendered[iR] = detail::linearToSRGB_f(fr);
+            rendered[iG] = detail::linearToSRGB_f(fg);
+            rendered[iB] = detail::linearToSRGB_f(fb);
+        }
+        else if (ourIsSRGB)
+        {
             rendered[0] = p[0]; rendered[1] = p[1];
             rendered[2] = p[2]; rendered[3] = p[3];
         }
