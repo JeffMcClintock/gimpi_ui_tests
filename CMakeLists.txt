@@ -12,6 +12,8 @@ include(FetchContent)
 # ---------------------------------------------------------------------------
 set(GMPI_UI_FOLDER_OVERRIDE "" CACHE PATH
     "Path to a local gmpi_ui repo, or blank to fetch from GitHub.")
+set(GMPI_SDK_FOLDER_OVERRIDE "" CACHE PATH
+    "Path to a local GMPI repo, or blank to fetch from GitHub.")
 
 if("${GMPI_UI_FOLDER_OVERRIDE}" STREQUAL "")
     message(STATUS "Fetching gmpi_ui from GitHub")
@@ -29,6 +31,21 @@ if("${GMPI_UI_FOLDER_OVERRIDE}" STREQUAL "")
 else()
     message(STATUS "Using local gmpi_ui: ${GMPI_UI_FOLDER_OVERRIDE}")
     set(GMPI_UI_SDK ${GMPI_UI_FOLDER_OVERRIDE})
+endif()
+
+if("${GMPI_SDK_FOLDER_OVERRIDE}" STREQUAL "")
+    message(STATUS "Fetching GMPI from GitHub")
+    FetchContent_Declare(
+        gmpi
+        GIT_REPOSITORY https://github.com/JeffMcClintock/GMPI
+        GIT_TAG        origin/main
+        SOURCE_SUBDIR  Core
+    )
+    FetchContent_MakeAvailable(gmpi)
+    set(GMPI_SDK ${gmpi_SOURCE_DIR})
+else()
+    message(STATUS "Using local GMPI: ${GMPI_SDK_FOLDER_OVERRIDE}")
+    set(GMPI_SDK ${GMPI_SDK_FOLDER_OVERRIDE})
 endif()
 
 # ---------------------------------------------------------------------------
@@ -70,6 +87,7 @@ endif()
 
 target_include_directories(gmpi_ui_tests PRIVATE
     ${GMPI_UI_SDK}
+    ${GMPI_SDK}
 )
 
 # Add headers so they appear in the Xcode project navigator and are searchable.
