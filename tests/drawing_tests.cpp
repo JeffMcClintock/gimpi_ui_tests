@@ -98,26 +98,27 @@ TEST_F(DrawingTest, RadialGradientFill)
 // Bitmap brush tests
 // ============================================================
 
-// Stroke a thick line with a checkerboard bitmap brush.
+// Stroke a thick line with a bitmap brush. The asymmetric anchor pattern
+// also catches phase errors anywhere along the stroke.
 TEST_F(DrawingTest, BitmapBrushLine)
 {
-    auto brush = makeCheckerboardBrush(Colors::DarkBlue, Colors::Yellow);
+    auto brush = makeAnchorPatternBrush();
     g.drawLine({8.f, 8.f}, {56.f, 56.f}, brush, 8.0f);
     EXPECT_TRUE(checkResult("bitmapBrushLine"));
 }
 
-// Fill a rectangle with a checkerboard bitmap brush.
+// Fill a rectangle with a bitmap brush.
 TEST_F(DrawingTest, BitmapBrushFillRectangle)
 {
-    auto brush = makeCheckerboardBrush(Colors::DarkGreen, Colors::White);
+    auto brush = makeAnchorPatternBrush();
     g.fillRectangle({4.f, 4.f, 60.f, 60.f}, brush);
     EXPECT_TRUE(checkResult("bitmapBrushFillRectangle"));
 }
 
-// Fill an ellipse with a checkerboard bitmap brush.
+// Fill an ellipse with a bitmap brush.
 TEST_F(DrawingTest, BitmapBrushFillEllipse)
 {
-    auto brush = makeCheckerboardBrush(Colors::DarkRed, Colors::White);
+    auto brush = makeAnchorPatternBrush();
     g.fillEllipse(gmpi::drawing::Ellipse{{32.f, 32.f}, 28.f, 28.f}, brush);
     EXPECT_TRUE(checkResult("bitmapBrushFillEllipse", 0, 8.0));
 }
@@ -125,7 +126,7 @@ TEST_F(DrawingTest, BitmapBrushFillEllipse)
 // Draw text using a bitmap brush as the foreground.
 TEST_F(DrawingTest, BitmapBrushText)
 {
-    auto brush = makeCheckerboardBrush(Colors::DarkBlue, Colors::Cyan);
+    auto brush = makeAnchorPatternBrush();
     auto tf = makeTextFormat(48.f);
     tf.setTextAlignment(TextAlignment::Center);
     tf.setParagraphAlignment(ParagraphAlignment::Center);
@@ -629,90 +630,92 @@ TEST_F(DrawingTest, ZeroWidthStroke)
 }
 
 // ============================================================
-// Bitmap brush origin / offset
+// Bitmap brush origin / phase
 // ============================================================
+//
+// All anchor/phase tests below share a common invariant:
+//
+//   The brush tiles starting at the LOCAL origin (0,0) of the active
+//   coordinate system - i.e. world (0,0) when no transform is set, or
+//   transform * (0,0) when setTransform has been applied. This matches
+//   Direct2D's ID2D1BitmapBrush behavior (which the macOS backend was
+//   originally written to mirror).
+//
+// They use the asymmetric 11x7 anchor pattern (makeAnchorPatternBrush) so
+// that a phase error of even one pixel is visible - the red anchor lands
+// on the wrong colour. A naive checkerboard hides bugs because shifts by a
+// multiple of its internal period are bitwise-identical.
 
-// Fill rect aligned to the pattern grid (rect origin == world origin == tile boundary).
-// The 8x8 checkerboard tiles should appear perfectly aligned with the rect corners.
+// Rect drawn at the local origin: the brush tile (0,0) coincides with the
+// rect's top-left, so the red anchor appears AT the rect corner.
 TEST_F(DrawingTest, BitmapBrushOriginAligned)
 {
-    auto brush = makeCheckerboardBrush(Colors::DarkBlue, Colors::LightGray);
-    // Rect starts at (0,0) — world origin — so tile boundaries coincide with rect edges.
+    auto brush = makeAnchorPatternBrush();
     g.fillRectangle({0.f, 0.f, 64.f, 64.f}, brush);
     EXPECT_TRUE(checkResult("bitmapBrushOriginAligned", 0, 8.0));
 }
 
-// Fill rect offset from the pattern grid: the brush origin stays at world (0,0),
-// so the tile pattern appears shifted by (4,4) relative to the rect's top-left corner.
+// Rect drawn at a non-origin position with NO transform: the brush tile
+// lattice still starts at world (0,0), so the red anchor appears at the
+// nearest tile boundary INSIDE the rect (not at the rect corner). Used as
+// a baseline against BitmapBrushOriginWithTransform: only the transform
+// should move the anchor.
 TEST_F(DrawingTest, BitmapBrushOriginOffset)
 {
-    auto brush = makeCheckerboardBrush(Colors::DarkBlue, Colors::LightGray);
-    // Rect starts at (4,4): 4 pixels into the 8-pixel tile, so the corner pixel
-    // comes from the middle of a tile rather than a tile boundary.
+    auto brush = makeAnchorPatternBrush();
     g.fillRectangle({4.f, 4.f, 60.f, 60.f}, brush);
     EXPECT_TRUE(checkResult("bitmapBrushOriginOffset", 0, 8.0));
 }
 
-// Demonstrate that setTransform shifts the pattern origin together with geometry:
-// the brush samples world-space coordinates, so translating the render target
-// shifts both the rect AND the pattern by the same amount — the pattern is
-// phase-shifted relative to where an un-transformed rect would land.
+// With setTransform(translate(4,4)), the rect at local (0,0)-(56,56) is
+// drawn at world (4,4)-(60,60) - and the brush MOVES WITH THE TRANSFORM.
+// The red anchor pixel must therefore appear at world (4,4) (the rect's
+// top-left), not at world (0,0). This is the test that the previous
+// 8x8 checkerboard version silently passed under a broken (world-anchored)
+// implementation because shifts by 4 are invisible to an 8x8 checker.
 TEST_F(DrawingTest, BitmapBrushOriginWithTransform)
 {
-    auto brush = makeCheckerboardBrush(Colors::Crimson, Colors::LightGray);
-    // With a (4,4) translation, drawing rect (0,0)-(56,56) is equivalent to
-    // drawing at (4,4)-(60,60) in world space — the pattern tiles from world (0,0)
-    // so the visible corner of the rect is 4 pixels into the first tile.
+    auto brush = makeAnchorPatternBrush();
     g.setTransform(makeTranslation(4.f, 4.f));
     g.fillRectangle({0.f, 0.f, 56.f, 56.f}, brush);
     g.setTransform(Matrix3x2{});
     EXPECT_TRUE(checkResult("bitmapBrushOriginWithTransform"));
 }
 
-// Strict phase / world-origin verification.
+// Phase consistency across multiple fills sharing one brush.
 //
-// A BitmapBrush samples the source bitmap by world-space coordinates: tile
-// (x mod W, y mod H) of the source maps to world pixel (x, y). The two rects
-// drawn below share one brush, so a correct implementation produces a single
-// continuous tiling â the pattern does NOT restart at each rect's corner.
-//
-// Design choices to defeat false positives:
-//   * Tile dimensions 11x7 are prime, so a shifted copy of the tile cannot
-//     accidentally re-align with itself at any offset < 11 (horiz) or 7 (vert).
-//     A small offset error in the brush phase is therefore detectable as a
-//     visible mismatch (unlike the 8x8 checker, which looks identical under
-//     any shift that is a multiple of 2).
-//   * The pattern is asymmetric (red anchor pixel + blue top row + green left
-//     column + cyan interior) so the four corners of every tile are visually
-//     distinct â phase errors of even 1 pixel move the red anchor onto a
-//     different colour.
-//   * Both rects are at non-origin positions so the test does not pass
-//     trivially with an implementation that tiles from the rect's own origin.
+// With no transform, two rects at unrelated non-origin positions see the
+// SAME global tile lattice anchored at world (0,0): the pattern is
+// continuous across both, with red anchors landing at world (11k, 7k)
+// coordinates that fall inside each rect's bounds. The pattern does NOT
+// restart at each rect's corner.
 TEST_F(DrawingTest, BitmapBrushPhase)
 {
-    constexpr uint32_t kPatW = 11;
-    constexpr uint32_t kPatH = 7;
-
-    auto patRT = drawingContext.factory().createCpuRenderTarget({kPatW, kPatH}, kRenderFlags);
-    patRT.beginDraw();
-    patRT.clear(Colors::Cyan);
-    auto blueBrush  = patRT.createSolidColorBrush(Colors::Blue);
-    auto greenBrush = patRT.createSolidColorBrush(Colors::Green);
-    auto redBrush   = patRT.createSolidColorBrush(Colors::Red);
-    patRT.fillRectangle({0.f, 0.f, float(kPatW), 1.f}, blueBrush);  // top row
-    patRT.fillRectangle({0.f, 0.f, 1.f, float(kPatH)}, greenBrush); // left column
-    patRT.fillRectangle({0.f, 0.f, 1.f, 1.f}, redBrush);            // anchor at (0,0)
-    patRT.endDraw();
-
-    auto patternBitmap = patRT.getBitmap();
-    auto brush = g.createBitmapBrush(patternBitmap);
-
-    // Two rects at unrelated non-origin positions. Each spans ~3 tiles in each
-    // direction so phase errors are visible at multiple tile boundaries.
+    auto brush = makeAnchorPatternBrush();
     g.fillRectangle({ 5.f,  3.f, 35.f, 25.f}, brush);
     g.fillRectangle({40.f, 30.f, 60.f, 60.f}, brush);
-
     EXPECT_TRUE(checkResult("bitmapBrushPhase"));
+}
+
+// Panel-style rendering: simulates the SynthEdit case that exposed the
+// macOS bug. Two identical fills under DIFFERENT per-module transforms
+// must look identical relative to each module's own bounding box - the
+// red anchor at the local (0,0) corner of BOTH modules. A world-anchored
+// brush would show different pattern offsets inside each module, which
+// is exactly the regression we hit.
+TEST_F(DrawingTest, BitmapBrushPanelStyle)
+{
+    auto brush = makeAnchorPatternBrush();
+    const Rect localRect{0.f, 0.f, 26.f, 22.f};
+
+    g.setTransform(makeTranslation( 3.f,  4.f));
+    g.fillRectangle(localRect, brush);
+
+    g.setTransform(makeTranslation(35.f, 38.f));
+    g.fillRectangle(localRect, brush);
+
+    g.setTransform(Matrix3x2{});
+    EXPECT_TRUE(checkResult("bitmapBrushPanelStyle"));
 }
 
 // ============================================================

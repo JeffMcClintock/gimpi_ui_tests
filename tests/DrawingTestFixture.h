@@ -118,6 +118,44 @@ protected:
         return g.createBitmapBrush(patternBitmap);
     }
 
+    // Build an 11x7 asymmetric "anchor" tile that exposes brush-phase bugs a
+    // checkerboard cannot. Use this whenever a test needs to verify WHERE the
+    // tile lattice lands (origin, offset, transform interactions, panel-style
+    // per-module transforms).
+    //
+    //   * Prime dimensions (11, 7) — no sub-tile self-similarity, so any
+    //     phase error of even 1 pixel produces a visible mismatch.
+    //   * Four visually distinct regions: red anchor at (0,0), blue along the
+    //     top row, green down the left column, cyan interior. Each tile corner
+    //     is therefore uniquely identifiable.
+    //
+    // Where this matters: a brush that anchors to world (0,0) vs one that
+    // anchors to the active local coord system (post-CTM) produces obviously
+    // different output under setTransform — the red anchor pixel moves.
+    BitmapBrush makeAnchorPatternBrush(
+        Color interior = Colors::Cyan,
+        Color topRow   = Colors::Blue,
+        Color leftCol  = Colors::Green,
+        Color anchor   = Colors::Red)
+    {
+        constexpr uint32_t kPatW = 11;
+        constexpr uint32_t kPatH = 7;
+        auto patRT = drawingContext.factory().createCpuRenderTarget({kPatW, kPatH}, kRenderFlags);
+
+        patRT.beginDraw();
+        patRT.clear(interior);
+        auto topBrush    = patRT.createSolidColorBrush(topRow);
+        auto leftBrush   = patRT.createSolidColorBrush(leftCol);
+        auto anchorBrush = patRT.createSolidColorBrush(anchor);
+        patRT.fillRectangle({0.f, 0.f, float(kPatW), 1.f}, topBrush);
+        patRT.fillRectangle({0.f, 0.f, 1.f, float(kPatH)}, leftBrush);
+        patRT.fillRectangle({0.f, 0.f, 1.f, 1.f}, anchorBrush);
+        patRT.endDraw();
+
+        auto patternBitmap = patRT.getBitmap();
+        return g.createBitmapBrush(patternBitmap);
+    }
+
     void TearDown() override
     {
         if (drawingActive)
