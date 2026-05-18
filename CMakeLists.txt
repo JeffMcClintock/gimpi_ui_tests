@@ -52,6 +52,7 @@ if(APPLE)
         tests/DrawingTestContext.mm
         ${GMPI_UI_SDK}/backends/DirectXGfx.cpp
         ${GMPI_UI_SDK}/experimental/grid.cpp
+        ${GMPI_UI_SDK}/experimental/primatives.cpp
         ${GMPI_UI_SDK}/experimental/ui_facades.cpp
     )
 else()
@@ -62,6 +63,7 @@ else()
         tests/DrawingTestContext.cpp
         ${GMPI_UI_SDK}/backends/DirectXGfx.cpp
         ${GMPI_UI_SDK}/experimental/grid.cpp
+        ${GMPI_UI_SDK}/experimental/primatives.cpp
         ${GMPI_UI_SDK}/experimental/ui_facades.cpp
     )
 endif()

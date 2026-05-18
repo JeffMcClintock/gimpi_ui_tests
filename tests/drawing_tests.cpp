@@ -669,6 +669,52 @@ TEST_F(DrawingTest, BitmapBrushOriginWithTransform)
     EXPECT_TRUE(checkResult("bitmapBrushOriginWithTransform"));
 }
 
+// Strict phase / world-origin verification.
+//
+// A BitmapBrush samples the source bitmap by world-space coordinates: tile
+// (x mod W, y mod H) of the source maps to world pixel (x, y). The two rects
+// drawn below share one brush, so a correct implementation produces a single
+// continuous tiling â the pattern does NOT restart at each rect's corner.
+//
+// Design choices to defeat false positives:
+//   * Tile dimensions 11x7 are prime, so a shifted copy of the tile cannot
+//     accidentally re-align with itself at any offset < 11 (horiz) or 7 (vert).
+//     A small offset error in the brush phase is therefore detectable as a
+//     visible mismatch (unlike the 8x8 checker, which looks identical under
+//     any shift that is a multiple of 2).
+//   * The pattern is asymmetric (red anchor pixel + blue top row + green left
+//     column + cyan interior) so the four corners of every tile are visually
+//     distinct â phase errors of even 1 pixel move the red anchor onto a
+//     different colour.
+//   * Both rects are at non-origin positions so the test does not pass
+//     trivially with an implementation that tiles from the rect's own origin.
+TEST_F(DrawingTest, BitmapBrushPhase)
+{
+    constexpr uint32_t kPatW = 11;
+    constexpr uint32_t kPatH = 7;
+
+    auto patRT = drawingContext.factory().createCpuRenderTarget({kPatW, kPatH}, kRenderFlags);
+    patRT.beginDraw();
+    patRT.clear(Colors::Cyan);
+    auto blueBrush  = patRT.createSolidColorBrush(Colors::Blue);
+    auto greenBrush = patRT.createSolidColorBrush(Colors::Green);
+    auto redBrush   = patRT.createSolidColorBrush(Colors::Red);
+    patRT.fillRectangle({0.f, 0.f, float(kPatW), 1.f}, blueBrush);  // top row
+    patRT.fillRectangle({0.f, 0.f, 1.f, float(kPatH)}, greenBrush); // left column
+    patRT.fillRectangle({0.f, 0.f, 1.f, 1.f}, redBrush);            // anchor at (0,0)
+    patRT.endDraw();
+
+    auto patternBitmap = patRT.getBitmap();
+    auto brush = g.createBitmapBrush(patternBitmap);
+
+    // Two rects at unrelated non-origin positions. Each spans ~3 tiles in each
+    // direction so phase errors are visible at multiple tile boundaries.
+    g.fillRectangle({ 5.f,  3.f, 35.f, 25.f}, brush);
+    g.fillRectangle({40.f, 30.f, 60.f, 60.f}, brush);
+
+    EXPECT_TRUE(checkResult("bitmapBrushPhase"));
+}
+
 // ============================================================
 // Polygon fill rules
 // ============================================================

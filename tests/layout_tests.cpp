@@ -36,12 +36,7 @@ namespace gmpi::ui::builder
     void RectangleView::Render(gmpi_forms::Environment*, gmpi::forms::primitive::Canvas&) const {}
 }
 
-// Stubs for MousePortal methods used by Grid::RenderIfDirty
-namespace gmpi::forms::primitive
-{
-    Interactor* MousePortal::saveMouseState() const { return nullptr; }
-    void MousePortal::restoreMouseState(Interactor*) {}
-}
+// MousePortal implementations are provided by MousePortal.cpp
 
 // ============================================================
 // Builder Wrappers (following library pattern)
