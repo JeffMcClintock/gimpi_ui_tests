@@ -706,7 +706,7 @@ TEST_F(DrawingTest, BitmapBrushPhase)
 TEST_F(DrawingTest, BitmapBrushPanelStyle)
 {
     auto brush = makeAnchorPatternBrush();
-    const Rect localRect{0.f, 0.f, 26.f, 22.f};
+    const gmpi::drawing::Rect localRect{0.f, 0.f, 26.f, 22.f};
 
     g.setTransform(makeTranslation( 3.f,  4.f));
     g.fillRectangle(localRect, brush);
