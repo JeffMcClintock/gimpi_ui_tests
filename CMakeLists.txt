@@ -62,28 +62,32 @@ FetchContent_MakeAvailable(googletest)
 # Test executable
 # ---------------------------------------------------------------------------
 if(APPLE)
-    add_executable(gmpi_ui_tests
-        tests/drawing_tests.cpp
-        tests/text_tests.cpp
-        tests/layout_tests.cpp
-        tests/DrawingTestContext.mm
-        ${GMPI_UI_SDK}/backends/DirectXGfx.cpp
-        ${GMPI_UI_SDK}/experimental/grid.cpp
-        ${GMPI_UI_SDK}/experimental/primatives.cpp
-        ${GMPI_UI_SDK}/experimental/ui_facades.cpp
-    )
+    set(DRAWING_TEST_CONTEXT_SRC tests/DrawingTestContext.mm)
+elseif(WIN32)
+    set(DRAWING_TEST_CONTEXT_SRC tests/DrawingTestContext.cpp)
 else()
-    add_executable(gmpi_ui_tests
-        tests/drawing_tests.cpp
-        tests/text_tests.cpp
-        tests/layout_tests.cpp
-        tests/DrawingTestContext.cpp
-        ${GMPI_UI_SDK}/backends/DirectXGfx.cpp
-        ${GMPI_UI_SDK}/experimental/grid.cpp
-        ${GMPI_UI_SDK}/experimental/primatives.cpp
-        ${GMPI_UI_SDK}/experimental/ui_facades.cpp
+    # Linux: render through gmpi_ui's JUCE backend (backends/JuceGfx.h).
+    set(DRAWING_TEST_CONTEXT_SRC tests/DrawingTestContext_juce.cpp)
+
+    FetchContent_Declare(
+        juce
+        GIT_REPOSITORY https://github.com/juce-framework/JUCE
+        GIT_TAG        8.0.6
+        GIT_SHALLOW    ON
     )
+    FetchContent_MakeAvailable(juce)
 endif()
+
+add_executable(gmpi_ui_tests
+    tests/drawing_tests.cpp
+    tests/text_tests.cpp
+    tests/layout_tests.cpp
+    ${DRAWING_TEST_CONTEXT_SRC}
+    ${GMPI_UI_SDK}/backends/DirectXGfx.cpp
+    ${GMPI_UI_SDK}/experimental/grid.cpp
+    ${GMPI_UI_SDK}/experimental/primatives.cpp
+    ${GMPI_UI_SDK}/experimental/ui_facades.cpp
+)
 
 target_include_directories(gmpi_ui_tests PRIVATE
     ${GMPI_UI_SDK}
@@ -129,7 +133,7 @@ if(APPLE)
         "-framework ImageIO"
         "-framework CoreText"
     )
-else()
+elseif(WIN32)
     target_link_libraries(gmpi_ui_tests PRIVATE
         gtest_main
         d2d1
@@ -137,6 +141,22 @@ else()
         WindowsCodecs
         d3d11
         dxgi
+    )
+else()
+    # Linux: the juce modules compile into this executable (plain target:
+    # JuceGfx.h falls back to direct module includes, no generated JuceHeader.h).
+    target_link_libraries(gmpi_ui_tests PRIVATE
+        gtest_main
+        juce::juce_gui_basics
+        juce::juce_graphics
+        juce::juce_events
+        juce::juce_core
+    )
+    target_compile_definitions(gmpi_ui_tests PRIVATE
+        JUCE_STANDALONE_APPLICATION=1
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+        JUCE_DONT_SET_USING_JUCE_NAMESPACE=1
     )
 endif()
 

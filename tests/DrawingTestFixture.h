@@ -57,6 +57,20 @@ protected:
         return REFERENCE_IMAGES_DIR;
     }
 
+    // A platform-specific reference ("<name>_linux.png") takes precedence over
+    // the shared one: different text rasterisers legitimately differ (JUCE/
+    // FreeType on Linux vs the DirectWrite/CoreText-rendered shared images),
+    // and a per-platform reference keeps the comparison tight instead of
+    // loosening tolerances for everyone.
+    static std::filesystem::path referencePath(const std::string& testName)
+    {
+#if !defined(_WIN32) && !defined(__APPLE__)
+        if (auto linuxRef = referenceDir() / (testName + "_linux.png"); std::filesystem::exists(linuxRef))
+            return linuxRef;
+#endif
+        return referenceDir() / (testName + ".png");
+    }
+
     void SetUp() override
     {
         g = drawingContext.createCpuRenderTarget({ kWidth, kHeight }, kRenderFlags);
@@ -178,7 +192,7 @@ protected:
     {
         auto bitmap = target.getBitmap();
 
-        const auto refPath    = referenceDir() / (testName + ".png");
+        const auto refPath    = referencePath(testName);
         const auto actualPath = referenceDir() / (testName + "_actual.png");
         const auto logPath    = referenceDir() / (testName + "_diff.log");
 
@@ -223,6 +237,7 @@ protected:
         const bool     ourIsSRGB = ourPixels.isSRGB();
         const uint8_t* refAddr = refPixels.getAddress();
         const int32_t  refBpr  = refPixels.getBytesPerRow();
+        const int32_t  refBpp  = refPixels.getBytesPerPixel();
 
         // Channel indices from the reference format (loaded PNG).
         // Layout 0=BGRA, 1=RGBA.
@@ -326,8 +341,35 @@ protected:
                     rendered[iB] = detail::linearToSRGB_f(fb);
                     rendered[iA] = a;
                 }
-                // Reference: sRGB BGRA from loaded PNG (always 32bppPBGRA).
-                const uint8_t* ref = refAddr + y * refBpr + x * 4;
+                // Reference pixel, as sRGB bytes in the reference's channel
+                // order. Windows/macOS lock loaded PNGs as 32bpp sRGB; the
+                // JUCE backend locks every colour bitmap as premultiplied
+                // linear RGBA half-float, so decode that back to sRGB here.
+                uint8_t refPixel[4];
+                const uint8_t* ref = refAddr + y * refBpr + x * refBpp;
+                if (refBpp == 8)
+                {
+                    const uint16_t* h = reinterpret_cast<const uint16_t*>(ref);
+                    float fr = gmpi::drawing::detail::halfToFloat(h[0]);
+                    float fg = gmpi::drawing::detail::halfToFloat(h[1]);
+                    float fb = gmpi::drawing::detail::halfToFloat(h[2]);
+                    float fa = gmpi::drawing::detail::halfToFloat(h[3]);
+
+                    const uint8_t a = static_cast<uint8_t>(std::clamp(fa * 255.0f + 0.5f, 0.0f, 255.0f));
+                    if (fa > 0.0f)
+                    {
+                        fr = std::clamp(fr / fa, 0.0f, 1.0f);
+                        fg = std::clamp(fg / fa, 0.0f, 1.0f);
+                        fb = std::clamp(fb / fa, 0.0f, 1.0f);
+                    }
+                    else { fr = fg = fb = 0.0f; }
+
+                    refPixel[iR] = detail::linearToSRGB_f(fr);
+                    refPixel[iG] = detail::linearToSRGB_f(fg);
+                    refPixel[iB] = detail::linearToSRGB_f(fb);
+                    refPixel[iA] = a;
+                    ref = refPixel;
+                }
 
                 int pixelMaxDiff = 0;
                 int pixelDiff    = 0;
