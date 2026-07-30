@@ -554,7 +554,7 @@ protected:
 
         auto bitmap = target.getBitmap();
 
-        const auto refPath    = referenceDir() / (testName + ".png");
+        const auto refPath    = referencePath(testName);
         const auto actualPath = referenceDir() / (testName + "_actual.png");
         const auto logPath    = referenceDir() / (testName + "_corr.log");
 
@@ -595,13 +595,18 @@ protected:
         const bool     ourIsSRGB = ourPixels.isSRGB();
         const uint8_t* refAddr  = refPixels.getAddress();
         const int32_t  refBpr   = refPixels.getBytesPerRow();
+        const int32_t  refBpp   = refPixels.getBytesPerPixel();
+        const bool     refIsInt = refPixels.isInteger();
+        const bool     refIsSRGB = refPixels.isSRGB();
 
         const int32_t refLayout = refPixels.channelLayout();
         const int iR = (refLayout == 0) ? 2 : 0;
         const int iG = 1;
         const int iB = (refLayout == 0) ? 0 : 2;
 
-        // Build grayscale float arrays.
+        // Build grayscale float arrays. The reference decodes through the same
+        // format-aware helper as the rendered side (the JUCE backend locks
+        // loaded PNGs as premultiplied linear RGBA half-float, not 32bpp sRGB).
         std::vector<float> ourGray(W * H);
         std::vector<float> refGray(W * H);
 
@@ -613,8 +618,9 @@ protected:
                     ourAddr, ourBpr, ourBpp, ourIsInt, ourIsSRGB, iR, iG, iB,
                     static_cast<uint32_t>(x), static_cast<uint32_t>(y));
 
-                const uint8_t* ref = refAddr + y * refBpr + x * 4;
-                refGray[y * W + x] = 0.299f * ref[iR] + 0.587f * ref[iG] + 0.114f * ref[iB];
+                refGray[y * W + x] = decodePixelGray(
+                    refAddr, refBpr, refBpp, refIsInt, refIsSRGB, iR, iG, iB,
+                    static_cast<uint32_t>(x), static_cast<uint32_t>(y));
             }
         }
 
