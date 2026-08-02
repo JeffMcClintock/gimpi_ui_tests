@@ -803,6 +803,183 @@ TEST(CpuText, ColourEmojiDoesNotLeakClipState)
     EXPECT_NEAR(transform._32, 0.0f, 1e-5f);
 }
 
+// --- Regressions from the text-engine review -------------------------------
+
+TEST(CpuText, FallbackDoesNotStickToLaterLatin)
+{
+    // Once a fallback face was adopted it used to keep every following
+    // character it happened to cover -- and fallback faces cover ASCII (emoji
+    // fonts carry 0-9 and # for keycaps; CJK fonts carry half-width Latin). A
+    // single leading symbol therefore dragged the whole string into the wrong
+    // font: measured before the fix, "<emoji> Hello 2024" itemised as ONE
+    // Segoe UI Emoji run.
+    //
+    // Assert FONT IDENTITY, not width. Width is a useless detector here: at
+    // this size Yu Gothic UI and Segoe UI Emoji both measure "Hello 2024"
+    // within about 1px of Arial, so the wrong font reads as almost the right
+    // width while the letterforms are completely different.
+    TextContext ctx;
+    auto format = ctx.makeFormat(20.0f, "Arial");
+    ASSERT_NE(AccessPtr::get(format), nullptr);
+
+    auto* fmt = dynamic_cast<gmpi::drawing::CpuTextFormat*>(AccessPtr::get(format));
+    ASSERT_NE(fmt, nullptr);
+    const auto primary = fmt->face;
+    ASSERT_TRUE(primary != nullptr);
+
+    const auto describe = [&](const char* sample) {
+        const auto spans = fmt->itemize(sample);
+        std::cout << "  [SPANS] \"" << sample << "\":";
+        for (const auto& span : spans)
+            std::cout << " [" << span.beginByte << "," << span.endByte << ")="
+                      << (span.face ? span.face->name : std::string("null"));
+        std::cout << std::endl;
+        return spans;
+    };
+
+    {
+        const auto spans = describe("Hello 2024");
+        ASSERT_FALSE(spans.empty());
+        for (const auto& span : spans)
+            EXPECT_EQ(span.face, primary) << "plain Latin left the primary font";
+    }
+
+    // After CJK, and after an emoji, the trailing Latin must return to the
+    // primary font -- which is what DirectWrite's MapCharacters does, since it
+    // is handed the base family at every unmapped position.
+    for (const char* sample : { "\xE4\xBD\xA0 Hello 2024", "\xF0\x9F\x98\x80 Hello 2024" })
+    {
+        const auto spans = describe(sample);
+        ASSERT_GE(spans.size(), 2u) << "expected a fallback run and a return to the primary font";
+        EXPECT_EQ(spans.back().face, primary)
+            << "trailing Latin stayed in the fallback font ("
+            << (spans.back().face ? spans.back().face->name : std::string("null")) << ")";
+    }
+}
+
+TEST(CpuText, FallbackSharesOneCopyPerFontFile)
+{
+    // Fallback is resolved per CODEPOINT. A page of CJK asks for a font
+    // hundreds of times, and each answer used to keep its own private copy of a
+    // multi-megabyte font file. Rendering a lot of distinct CJK must not blow
+    // memory up; this would previously allocate ~40 copies of the CJK font.
+    TextContext ctx;
+    auto format = ctx.makeFormat(16.0f, "Arial");
+    ASSERT_NE(AccessPtr::get(format), nullptr);
+
+    // 40 distinct CJK codepoints.
+    std::string many;
+    for (uint32_t cp = 0x4E00; cp < 0x4E00 + 40; ++cp)
+    {
+        many += char(0xE0 | (cp >> 12));
+        many += char(0x80 | ((cp >> 6) & 0x3F));
+        many += char(0x80 | (cp & 0x3F));
+    }
+
+    const auto extent = format.getTextExtentU(many);
+    EXPECT_GT(extent.width, 0.0f) << "no CJK advances";
+
+    auto rt = ctx.makeTarget(700, 40);
+    rt.beginDraw();
+    rt.clear(Colors::White);
+    auto black = rt.createSolidColorBrush(Colors::Black);
+    rt.drawTextU(many, format, { 2.f, 2.f, 698.f, 38.f }, black);
+    rt.endDraw();
+    auto bmp = rt.getBitmap();
+    EXPECT_GT(inkFraction(bmp), 0.01f);
+}
+
+TEST(CpuText, WrapNeverSplitsAMultiGlyphCluster)
+{
+    // A cluster can shape to several glyphs (base plus mark), and they all
+    // carry the same source byte. Testing the byte alone let a break land
+    // between them, splitting a grapheme.
+    TextContext ctx;
+    auto format = ctx.makeFormat(18.0f);
+    ASSERT_NE(AccessPtr::get(format), nullptr);
+    AccessPtr::get(format)->setWordWrapping(WordWrapping::Wrap);
+
+    // Several accented characters, each a base plus a combining mark.
+    const char* accented = "e\xCC\x81" "e\xCC\x81" "e\xCC\x81" "e\xCC\x81";
+    const auto natural = format.getTextExtentU(accented, 100000.0f);
+    ASSERT_GT(natural.width, 0.0f);
+
+    // Squeeze hard. There are no spaces, so there is nowhere legal to break:
+    // the text must stay on one line rather than splitting mid-cluster.
+    const auto squeezed = format.getTextExtentU(accented, natural.width * 0.3f);
+    EXPECT_NEAR(squeezed.height, natural.height, 0.01f)
+        << "a grapheme cluster was split across lines";
+}
+
+TEST(CpuText, TextUnderTransformAndClip)
+{
+    // Text had no coverage at all under a transform or a clip.
+    TextContext ctx;
+    auto format = ctx.makeFormat(18.0f);
+    ASSERT_NE(AccessPtr::get(format), nullptr);
+
+    auto rt = ctx.makeTarget(96, 96);
+    rt.beginDraw();
+    rt.clear(Colors::White);
+    auto black = rt.createSolidColorBrush(Colors::Black);
+
+    const auto m = Matrix3x2{ 1.4f, 0.0f, 0.0f, 1.4f, 6.0f, 6.0f };
+    AccessPtr::get(rt)->setTransform(&m);
+    rt.drawTextU("Wg", format, { 0.f, 0.f, 60.f, 30.f }, black);
+    const Matrix3x2 identity;
+    AccessPtr::get(rt)->setTransform(&identity);
+    rt.endDraw();
+
+    auto bmp = rt.getBitmap();
+    const auto scaled = inkBounds(bmp);
+    ASSERT_TRUE(scaled.any()) << "transformed text did not render";
+    EXPECT_GE(scaled.left, 5) << "text ignored the transform's translation";
+
+    // Same text, clipped to a band that must cut it.
+    auto rt2 = ctx.makeTarget(96, 96);
+    rt2.beginDraw();
+    rt2.clear(Colors::White);
+    auto black2 = rt2.createSolidColorBrush(Colors::Black);
+    rt2.pushAxisAlignedClip({ 0.f, 0.f, 96.f, 10.f });
+    rt2.drawTextU("Wg", format, { 2.f, 2.f, 90.f, 40.f }, black2);
+    rt2.popAxisAlignedClip();
+    rt2.endDraw();
+
+    auto bmp2 = rt2.getBitmap();
+    const auto clipped = inkBounds(bmp2);
+    if (clipped.any())
+        EXPECT_LT(clipped.bottom, 10) << "text drew outside the clip";
+}
+
+TEST(CpuText, DegenerateLayoutInputs)
+{
+    TextContext ctx;
+    auto format = ctx.makeFormat(16.0f);
+    ASSERT_NE(AccessPtr::get(format), nullptr);
+    AccessPtr::get(format)->setWordWrapping(WordWrapping::Wrap);
+
+    // None of these may hang, crash, or report nonsense.
+    EXPECT_NEAR(format.getTextExtentU("").width, 0.0f, 0.01f);
+    EXPECT_GE(format.getTextExtentU("   ").width, 0.0f);
+    EXPECT_GT(format.getTextExtentU("\n\n\n").height, 0.0f);
+    EXPECT_GT(format.getTextExtentU("word", 0.0f).width, 0.0f);      // zero limit
+    EXPECT_GT(format.getTextExtentU("word", -5.0f).width, 0.0f);     // negative limit
+    EXPECT_GT(format.getTextExtentU("word", 0.001f).width, 0.0f);    // absurdly tight
+
+    auto rt = ctx.makeTarget(32, 32);
+    rt.beginDraw();
+    rt.clear(Colors::White);
+    auto black = rt.createSolidColorBrush(Colors::Black);
+    rt.drawTextU("", format, { 0.f, 0.f, 32.f, 32.f }, black);       // empty draw
+
+    // A null brush can only be reached through the native interface, since the
+    // wrapper takes a reference. It must decline rather than crash.
+    const Rect layout{ 0.f, 0.f, 32.f, 32.f };
+    AccessPtr::get(rt)->drawTextU("x", 1, AccessPtr::get(format), &layout, nullptr, 0);
+    rt.endDraw();
+    SUCCEED();
+}
+
 TEST(CpuText, MissingFontFailsAtTheInterface)
 {
     // The native interface reports failure for a family that does not exist...
