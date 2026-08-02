@@ -347,6 +347,57 @@ TEST(CpuVsD2D, ClipWithRotatedFill)
     });
 }
 
+TEST(CpuVsD2D, ClipGeometryStar)
+{
+    // Arbitrary-shape clipping. D2D implements it with PushLayer and an
+    // antialiased mask; ours rasterizes the geometry to a coverage mask, so
+    // the clip edge should be antialiased the same way rather than aliased.
+    runScene("x_clip_geometry", [](BitmapRenderTarget& rt) {
+        rt.clear(Colors::White);
+        auto star = makeStar(rt, FillMode::Winding);
+        rt.pushClipGeometry(star);
+        auto brush = rt.createSolidColorBrush(Colors::DarkGreen);
+        rt.fillRectangle({ 0.f, 0.f, 64.f, 64.f }, brush);
+        rt.popAxisAlignedClip();
+    });
+}
+
+TEST(CpuVsD2D, ClipGeometryIntersectsRectClip)
+{
+    // A shaped clip must intersect with an enclosing rectangular clip, and
+    // popping must restore exactly one level.
+    runScene("x_clip_geometry_nested", [](BitmapRenderTarget& rt) {
+        rt.clear(Colors::White);
+        auto red = rt.createSolidColorBrush(Colors::Red);
+        auto blue = rt.createSolidColorBrush(Colors::Blue);
+
+        rt.pushAxisAlignedClip({ 0.f, 0.f, 64.f, 34.f }); // top half only
+        auto star = makeStar(rt, FillMode::Winding);
+        rt.pushClipGeometry(star);
+        rt.fillRectangle({ 0.f, 0.f, 64.f, 64.f }, red);
+        rt.popAxisAlignedClip();   // drop the star
+        rt.fillRectangle({ 0.f, 40.f, 64.f, 64.f }, blue); // still clipped to the top half: invisible
+        rt.popAxisAlignedClip();
+        rt.fillRectangle({ 56.f, 56.f, 64.f, 64.f }, blue); // now unclipped
+    });
+}
+
+TEST(CpuVsD2D, ClipGeometryUnderTransform)
+{
+    runScene("x_clip_geometry_transform", [](BitmapRenderTarget& rt) {
+        rt.clear(Colors::White);
+        const auto m = makeRotationAbout(0.5f, 32.0f, 32.0f);
+        AccessPtr::get(rt)->setTransform(&m);
+        auto star = makeStar(rt, FillMode::Winding);
+        rt.pushClipGeometry(star);
+        const Matrix3x2 identity;
+        AccessPtr::get(rt)->setTransform(&identity);
+        auto brush = rt.createSolidColorBrush(Colors::Maroon);
+        rt.fillRectangle({ 0.f, 0.f, 64.f, 64.f }, brush);
+        rt.popAxisAlignedClip();
+    });
+}
+
 TEST(CpuVsD2D, NestedClips)
 {
     runScene("x_nested_clips", [](BitmapRenderTarget& rt) {

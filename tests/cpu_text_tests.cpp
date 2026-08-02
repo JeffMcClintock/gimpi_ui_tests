@@ -694,6 +694,115 @@ TEST(CpuText, DrawsBitmapColourEmoji)
     savePng(std::filesystem::path(REFERENCE_IMAGES_DIR) / "cpu_backend_preview" / "text_emoji.png", bmp);
 }
 
+// --- Stage D: COLRv1 vector colour glyphs ----------------------------------
+
+TEST(CpuText, DrawsColrColourEmoji)
+{
+    const auto report = probeEmojiFont();
+    if (!report.found)
+        GTEST_SKIP() << "no emoji font found";
+    if (!report.paint)
+        GTEST_SKIP() << report.family << " has no COLRv1 paint table";
+
+    TextContext ctx;
+    auto format = ctx.makeFormat(40.0f, "Arial"); // fallback finds the emoji font
+    ASSERT_NE(AccessPtr::get(format), nullptr);
+
+    auto rt = ctx.makeTarget(64, 64);
+    rt.beginDraw();
+    rt.clear(Colors::White);
+    auto black = rt.createSolidColorBrush(Colors::Black);
+    rt.drawTextU(kGrinningFace, format, { 2.f, 2.f, 62.f, 62.f }, black);
+    rt.endDraw();
+
+    auto bmp = rt.getBitmap();
+    EXPECT_GT(inkFraction(bmp), 0.05f) << "COLRv1 emoji produced no pixels";
+
+    // The point of COLR is colour: the glyph must not come out monochrome,
+    // which is what would happen if the brush were used instead of the paint.
+    auto px = bmp.lockPixels(BitmapLockFlags::Read);
+    int colouredPixels = 0;
+    for (int y = 0; y < 64; ++y)
+    {
+        const uint16_t* row = reinterpret_cast<const uint16_t*>(px.getAddress() + size_t(y) * px.getBytesPerRow());
+        for (int x = 0; x < 64; ++x)
+        {
+            const float r = detail::halfToFloat(row[x * 4 + 0]);
+            const float g = detail::halfToFloat(row[x * 4 + 1]);
+            const float b = detail::halfToFloat(row[x * 4 + 2]);
+            if (std::fabs(r - g) > 0.15f || std::fabs(g - b) > 0.15f)
+                ++colouredPixels;
+        }
+    }
+    EXPECT_GT(colouredPixels, 50) << "emoji rendered monochrome — paint callbacks did not run";
+    savePng(std::filesystem::path(REFERENCE_IMAGES_DIR) / "cpu_backend_preview" / "text_emoji_colr.png", bmp);
+}
+
+TEST(CpuText, MixedLatinCjkAndEmojiInOneString)
+{
+    // The whole text stack in one line: Latin from the requested font, CJK and
+    // emoji found by fallback, the emoji in full colour, laid out together.
+    TextContext ctx;
+    auto format = ctx.makeFormat(30.0f, "Arial");
+    ASSERT_NE(AccessPtr::get(format), nullptr);
+
+    const char* mixed = "Hi \xE4\xBD\xA0\xE5\xA5\xBD \xF0\x9F\x98\x80"; // Hi 你好 😀
+
+    auto rt = ctx.makeTarget(200, 48);
+    rt.beginDraw();
+    rt.clear(Colors::White);
+    auto black = rt.createSolidColorBrush(Colors::Black);
+    rt.drawTextU(mixed, format, { 4.f, 4.f, 196.f, 44.f }, black);
+    rt.endDraw();
+
+    auto bmp = rt.getBitmap();
+    EXPECT_GT(inkFraction(bmp), 0.03f) << "mixed-script line did not render";
+    savePng(std::filesystem::path(REFERENCE_IMAGES_DIR) / "cpu_backend_preview" / "text_mixed_all.png", bmp);
+}
+
+TEST(CpuText, ColourEmojiDoesNotLeakClipState)
+{
+    // Painting pushes clips and transforms. If any leaked, later drawing would
+    // be clipped away or displaced.
+    const auto report = probeEmojiFont();
+    if (!report.found || !report.paint)
+        GTEST_SKIP() << "no COLRv1 emoji font";
+
+    TextContext ctx;
+    auto format = ctx.makeFormat(24.0f, "Arial");
+    auto rt = ctx.makeTarget(64, 64);
+
+    rt.beginDraw();
+    rt.clear(Colors::White);
+    auto black = rt.createSolidColorBrush(Colors::Black);
+    rt.drawTextU(kGrinningFace, format, { 2.f, 2.f, 40.f, 40.f }, black);
+
+    // A full-surface fill after the emoji must cover everything.
+    auto blue = rt.createSolidColorBrush(Colors::Blue);
+    rt.fillRectangle({ 0.f, 0.f, 64.f, 64.f }, blue);
+    rt.endDraw();
+
+    auto bmp = rt.getBitmap();
+    auto px = bmp.lockPixels(BitmapLockFlags::Read);
+    for (int y = 0; y < 64; y += 7)
+    {
+        const uint16_t* row = reinterpret_cast<const uint16_t*>(px.getAddress() + size_t(y) * px.getBytesPerRow());
+        for (int x = 0; x < 64; x += 7)
+        {
+            EXPECT_NEAR(detail::halfToFloat(row[x * 4 + 2]), 1.0f, 0.02f)
+                << "pixel (" << x << "," << y << ") was not covered: a clip leaked out of glyph painting";
+            EXPECT_NEAR(detail::halfToFloat(row[x * 4 + 0]), 0.0f, 0.02f);
+        }
+    }
+
+    // And the transform must be back where the caller left it.
+    Matrix3x2 transform{};
+    AccessPtr::get(rt)->getTransform(&transform);
+    EXPECT_NEAR(transform._11, 1.0f, 1e-5f);
+    EXPECT_NEAR(transform._31, 0.0f, 1e-5f);
+    EXPECT_NEAR(transform._32, 0.0f, 1e-5f);
+}
+
 TEST(CpuText, MissingFontFailsAtTheInterface)
 {
     // The native interface reports failure for a family that does not exist...
