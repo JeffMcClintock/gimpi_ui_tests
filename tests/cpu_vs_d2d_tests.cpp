@@ -605,6 +605,103 @@ constexpr MetricFont kMetricFonts[] = {
     { "Bahnschrift", "USE_TYPO_METRICS set; typo 1.0000 em vs usWin 1.2002 em" },
 };
 
+// FontFlags::CapHeight is the one size mode that currently works, and until now
+// nothing tested it through Direct2D at all — the only cap-height test used the
+// CPU engine. Its postcondition is simple and worth pinning: ask for a cap
+// height of N and the reported capHeight must BE N.
+//
+// The fonts here are the awkward ones: Wingdings, Symbol, Marlett and Webdings
+// all carry OS/2 version 1 tables, which have no sCapHeight field at all, and
+// none of them contains a Latin capital to measure. The natural worry is that
+// cap-height scaling then divides by zero. It does not — DirectWrite
+// synthesises a cap height (0.7 em for these), so the mode still works.
+//
+// Which means this test passes with or without the divide guard in
+// DirectXGfx.cpp. That guard is defensive only; this test covers the mode's
+// postcondition on hostile input rather than pretending to cover the guard.
+TEST(CpuVsD2D, CapHeightWorksForFontsWithoutSCapHeight)
+{
+    DrawingTestContext d2d;
+
+    // OS/2 sCapHeight == 0 for all of these (verified by table parsing).
+    for (const char* name : { "Wingdings", "Symbol", "Marlett", "Webdings" })
+    {
+        SCOPED_TRACE(name);
+        std::string_view family{ name };
+
+        constexpr float kCapHeight = 20.0f;
+        auto format = d2d.factory().createTextFormat(
+            kCapHeight, { &family, 1 }, FontWeight::Regular, FontStyle::Normal,
+            FontStretch::Normal, FontFlags::CapHeight);
+        ASSERT_NE(AccessPtr::get(format), nullptr);
+
+        const auto m = format.getFontMetrics();
+        std::cout << "  [SYMBOL] " << name << ": capHeight " << m.capHeight
+                  << " ascent " << m.ascent << " descent " << m.descent << "\n";
+
+        // The postcondition of the mode: what you asked for is what you get.
+        EXPECT_NEAR(m.capHeight, kCapHeight, 0.01f)
+            << "cap-height scaling did not hit its target";
+
+        EXPECT_TRUE(std::isfinite(m.ascent))  << "ascent is not finite";
+        EXPECT_TRUE(std::isfinite(m.descent)) << "descent is not finite";
+        EXPECT_GT(m.ascent, 0.0f);
+
+        const auto extent = format.getTextExtentU("AB");
+        EXPECT_TRUE(std::isfinite(extent.width))  << "extent width is not finite";
+        EXPECT_TRUE(std::isfinite(extent.height)) << "extent height is not finite";
+        EXPECT_LT(extent.height, 1000.0f) << "text is absurdly large — 1/0 scaling?";
+    }
+}
+
+// A markdown heading is a multiplier on the base font size. The subtlety is
+// WHICH base: createRichTextFormat builds its base format through
+// createTextFormat, which may have scaled the size to hit a requested cap
+// height, so the heading must scale THAT, not the caller's raw request.
+//
+// Scaling the raw request instead gives a document whose body honours the size
+// mode and whose headings quietly do not. With Arial at CapHeight the base is
+// scaled by ~1.40, so a level-1 heading (x2.0) came out at 2.0/1.40 = 1.43x the
+// body instead of 2.0x — headings nearly a third too small, and only in
+// cap-height documents, which is why it went unnoticed.
+//
+// Uses width, not height: the parser appends blank lines after a heading, so
+// height confounds the font size with the line count.
+TEST(CpuVsD2D, MarkdownHeadingScalesTheModeAdjustedSize)
+{
+    DrawingTestContext d2d;
+
+    std::string_view family{ "Arial" };
+    constexpr float kSize = 20.0f;
+    constexpr float kHeadingScale = 2.0f; // level 1, per backends/MarkdownParser.h
+
+    auto measure = [&](const char* markdown, FontFlags flags)
+    {
+        auto rtf = d2d.factory().createRichTextFormat(
+            markdown, kSize, { &family, 1 }, flags,
+            TextAlignment::Leading, ParagraphAlignment::Near, WordWrapping::Wrap);
+        EXPECT_NE(AccessPtr::get(rtf), nullptr);
+        return rtf.getTextExtentU().width;
+    };
+
+    for (const auto flags : { FontFlags::SystemHeight, FontFlags::CapHeight })
+    {
+        SCOPED_TRACE(flags == FontFlags::CapHeight ? "CapHeight" : "SystemHeight");
+
+        const float heading = measure("# HHHH", flags);
+        const float body    = measure("HHHH", flags);
+        ASSERT_GT(body, 0.0f);
+
+        const float ratio = heading / body;
+        std::cout << "  [HEADING] " << (flags == FontFlags::CapHeight ? "CapHeight" : "SystemHeight")
+                  << ": heading " << heading << " body " << body << " ratio " << ratio << "\n";
+
+        // Whatever the size mode, a level-1 heading is exactly twice the body.
+        EXPECT_NEAR(ratio, kHeadingScale, 0.05f)
+            << "heading scaled from the wrong base size";
+    }
+}
+
 TEST(CpuVsD2D, TextMetricsAgreeWithDirectWrite)
 {
     DrawingTestContext d2d;
