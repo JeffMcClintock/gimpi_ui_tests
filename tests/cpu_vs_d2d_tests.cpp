@@ -577,6 +577,34 @@ TEST(CpuVsD2D, WindingBeyondTwo)
 // metrics and layout are: hosts position UI against them, so a disagreement
 // here shifts real interfaces.
 
+// Arial is the friendly case: its hhea ascender/descender happen to equal its
+// OS/2 usWinAscent/usWinDescent, so ANY reasonable metric source agrees and the
+// test passes without proving much. Calibri and Consolas are the ones that
+// bite — for both, hhea ascent+descent is exactly one em (2048/2048) while
+// DirectWrite reports 1.2207 em and 1.1709 em. A backend reading hhea and one
+// reading OS/2 therefore disagree by ~22% and ~17% on those two fonts while
+// agreeing perfectly on Arial.
+//
+// That matters beyond metrics reporting: body-height font scaling divides by
+// exactly this quantity, so the two backends would scale text differently.
+// "Body height" has to mean ONE thing across backends, and this is the test
+// that holds them to it.
+struct MetricFont
+{
+    const char* family;
+    const char* note;
+};
+constexpr MetricFont kMetricFonts[] = {
+    { "Arial",    "hhea == OS/2 usWin; agrees under any metric source" },
+    { "Calibri",  "hhea says 1.0000 em, OS/2 usWin says 1.2207 em" },
+    { "Consolas", "hhea says 1.0000 em, OS/2 usWin says 1.1709 em" },
+    { "Verdana",  "control: hhea == OS/2 usWin" },
+    // Sets OS/2 fsSelection bit 7 (USE_TYPO_METRICS), and its typo metrics are
+    // 1.0000 em against usWin's 1.2002 em — so this font, and only this font,
+    // reveals whether the reference backend honours that bit.
+    { "Bahnschrift", "USE_TYPO_METRICS set; typo 1.0000 em vs usWin 1.2002 em" },
+};
+
 TEST(CpuVsD2D, TextMetricsAgreeWithDirectWrite)
 {
     DrawingTestContext d2d;
@@ -588,7 +616,11 @@ TEST(CpuVsD2D, TextMetricsAgreeWithDirectWrite)
     *AccessPtr::put(cpuFactory) = &cpuImpl;
 
     constexpr float kHeight = 20.0f;
-    std::string_view family{ "Arial" };
+
+    for (const auto& probe : kMetricFonts)
+    {
+    SCOPED_TRACE(testing::Message() << probe.family << " (" << probe.note << ")");
+    std::string_view family{ probe.family };
 
     auto d2dFormat = d2d.factory().createTextFormat(kHeight, { &family, 1 });
     auto cpuFormat = cpuFactory.createTextFormat(kHeight, { &family, 1 });
@@ -597,17 +629,33 @@ TEST(CpuVsD2D, TextMetricsAgreeWithDirectWrite)
 
     const auto dm = d2dFormat.getFontMetrics();
     const auto cm = cpuFormat.getFontMetrics();
-    std::cout << "  [METRICS] ascent " << cm.ascent << " vs " << dm.ascent
+    std::cout << "  [METRICS] " << probe.family
+              << ": ascent " << cm.ascent << " vs " << dm.ascent
               << " | descent " << cm.descent << " vs " << dm.descent
               << " | lineGap " << cm.lineGap << " vs " << dm.lineGap
               << " | capHeight " << cm.capHeight << " vs " << dm.capHeight
-              << " | xHeight " << cm.xHeight << " vs " << dm.xHeight << "\n";
+              << " | xHeight " << cm.xHeight << " vs " << dm.xHeight
+              << " | body " << calcBodyHeight(cm) << " vs " << calcBodyHeight(dm) << "\n";
 
     EXPECT_NEAR(cm.ascent, dm.ascent, 0.15f);
     EXPECT_NEAR(cm.descent, dm.descent, 0.15f);
     EXPECT_NEAR(cm.lineGap, dm.lineGap, 0.15f);
     EXPECT_NEAR(cm.capHeight, dm.capHeight, 0.15f);
     EXPECT_NEAR(cm.xHeight, dm.xHeight, 0.15f);
+
+    // The quantity body-height scaling actually divides by. Asserted directly
+    // so a future metric change cannot drift it while the parts still agree.
+    EXPECT_NEAR(calcBodyHeight(cm), calcBodyHeight(dm), 0.2f)
+        << "body height (ascent+descent) must mean the same thing in both backends";
+    }
+
+    // The remaining checks are shaping/layout rather than metric-source, so one
+    // representative font is enough.
+    std::string_view family{ "Arial" };
+    auto d2dFormat = d2d.factory().createTextFormat(kHeight, { &family, 1 });
+    auto cpuFormat = cpuFactory.createTextFormat(kHeight, { &family, 1 });
+    ASSERT_NE(AccessPtr::get(d2dFormat), nullptr);
+    ASSERT_NE(AccessPtr::get(cpuFormat), nullptr);
 
     // Single-line advance width: same font, same shaper input.
     const auto dWidth = d2dFormat.getTextExtentU("Hello, world").width;
