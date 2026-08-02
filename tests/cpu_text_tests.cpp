@@ -355,6 +355,172 @@ TEST(CpuText, RendersCjkWithACoveringFont)
     savePng(std::filesystem::path(REFERENCE_IMAGES_DIR) / "cpu_backend_preview" / "text_cjk.png", bmp);
 }
 
+// --- Stage B: fallback, line breaking, grapheme clusters -------------------
+
+namespace
+{
+// UTF-8 literals written as explicit bytes, so these tests do not depend on
+// the compiler's source-encoding assumptions.
+constexpr const char* kNiHao = "\xE4\xBD\xA0\xE5\xA5\xBD";                     // 你好
+constexpr const char* kCjkSentence = "\xE4\xBD\xA0\xE5\xA5\xBD\xE4\xB8\x96\xE7\x95\x8C"
+                                     "\xE4\xBD\xA0\xE5\xA5\xBD\xE4\xB8\x96\xE7\x95\x8C"; // 你好世界你好世界
+constexpr const char* kAccented = "e\xCC\x81";                                 // e + combining acute
+} // namespace
+
+TEST(CpuText, FallsBackForUncoveredScript)
+{
+    // Arial has no CJK. Without fallback these become .notdef boxes or nothing;
+    // with it, a covering font is found automatically.
+    TextContext ctx;
+    auto format = ctx.makeFormat(24.0f, "Arial");
+    ASSERT_NE(AccessPtr::get(format), nullptr);
+
+    const auto latin = format.getTextExtentU("ab");
+    const auto cjk = format.getTextExtentU(kNiHao);
+    EXPECT_GT(cjk.width, 0.0f) << "CJK produced no advances at all";
+
+    auto rt = ctx.makeTarget(120, 48);
+    rt.beginDraw();
+    rt.clear(Colors::White);
+    auto black = rt.createSolidColorBrush(Colors::Black);
+    // Mixed script in one string: this is what fallback is for.
+    rt.drawTextU("Hi \xE4\xBD\xA0\xE5\xA5\xBD", format, { 2.f, 2.f, 118.f, 46.f }, black);
+    rt.endDraw();
+
+    auto bmp = rt.getBitmap();
+    EXPECT_GT(inkFraction(bmp), 0.02f) << "mixed Latin/CJK text did not render";
+    savePng(std::filesystem::path(REFERENCE_IMAGES_DIR) / "cpu_backend_preview" / "text_fallback_mixed.png", bmp);
+
+    // A CJK glyph is around an em wide, far wider than two Latin letters at
+    // the same size — a cheap check that real glyphs were found, not blanks.
+    EXPECT_GT(cjk.width, latin.width * 0.8f);
+}
+
+TEST(CpuText, CjkWrapsBetweenCharacters)
+{
+    // CJK has no spaces, so a space-only line breaker cannot wrap it at all.
+    TextContext ctx;
+    auto format = ctx.makeFormat(20.0f, "Arial");
+    ASSERT_NE(AccessPtr::get(format), nullptr);
+    AccessPtr::get(format)->setWordWrapping(WordWrapping::Wrap);
+
+    const auto unwrapped = format.getTextExtentU(kCjkSentence, 100000.0f);
+    ASSERT_GT(unwrapped.width, 0.0f);
+
+    const float limit = unwrapped.width * 0.4f;
+    const auto wrapped = format.getTextExtentU(kCjkSentence, limit);
+
+    EXPECT_GT(wrapped.height, unwrapped.height) << "CJK did not wrap — it has no spaces to break at";
+    EXPECT_LE(wrapped.width, limit + 0.5f) << "wrapped CJK exceeded the width limit";
+}
+
+TEST(CpuText, LongUnbreakableWordStillProgresses)
+{
+    // A single word wider than the limit has no break opportunity. It must
+    // overflow rather than loop forever or produce zero-length lines.
+    TextContext ctx;
+    auto format = ctx.makeFormat(16.0f);
+    ASSERT_NE(AccessPtr::get(format), nullptr);
+    AccessPtr::get(format)->setWordWrapping(WordWrapping::Wrap);
+
+    const auto extent = format.getTextExtentU("Supercalifragilistic", 10.0f);
+    EXPECT_GT(extent.width, 0.0f);
+    EXPECT_GT(extent.height, 0.0f);
+    EXPECT_LT(extent.height, 16.0f * 40.0f) << "one line per glyph suggests a runaway break loop";
+}
+
+TEST(CpuText, CombiningMarkStaysWithItsBase)
+{
+    // "e" + combining acute is ONE grapheme cluster: it must never be split
+    // across a line break, and must not be itemised into a different font.
+    TextContext ctx;
+    auto format = ctx.makeFormat(20.0f);
+    ASSERT_NE(AccessPtr::get(format), nullptr);
+    AccessPtr::get(format)->setWordWrapping(WordWrapping::Wrap);
+
+    const auto combined = format.getTextExtentU(kAccented, 100000.0f);
+    const auto plain = format.getTextExtentU("e", 100000.0f);
+
+    // The mark composes onto the base, so the pair is no wider than a letter
+    // or two — certainly not two full advances plus a separate mark glyph.
+    EXPECT_GT(combined.width, 0.0f);
+    EXPECT_LT(combined.width, plain.width * 2.5f);
+
+    // Squeezing the width must not break between base and mark: with only one
+    // cluster there is nowhere to break, so it stays a single line.
+    const auto squeezed = format.getTextExtentU(kAccented, 1.0f);
+    EXPECT_NEAR(squeezed.height, combined.height, 0.01f) << "a grapheme cluster was split";
+}
+
+TEST(CpuText, SegmentationClassifiesClustersAndBreaks)
+{
+    using namespace gmpi::drawing::text;
+
+    // Grapheme clusters: base + combining mark is one cluster.
+    {
+        const auto cps = decodeUtf8(kAccented);
+        ASSERT_EQ(cps.size(), 2u);
+        const auto boundaries = graphemeBoundaries(cps);
+        EXPECT_EQ(boundaries[0], 1);
+        EXPECT_EQ(boundaries[1], 0) << "a combining mark must not start a cluster";
+    }
+
+    // A ZWJ emoji sequence is one cluster: man + ZWJ + computer.
+    {
+        const auto cps = decodeUtf8("\xF0\x9F\x91\xA8\xE2\x80\x8D\xF0\x9F\x92\xBB");
+        ASSERT_EQ(cps.size(), 3u);
+        const auto boundaries = graphemeBoundaries(cps);
+        EXPECT_EQ(boundaries[0], 1);
+        EXPECT_EQ(boundaries[1], 0) << "ZWJ joins";
+        EXPECT_EQ(boundaries[2], 0) << "the glyph after a ZWJ joins too";
+    }
+
+    // A flag is a pair of regional indicators: one cluster, and a third
+    // indicator starts a new one.
+    {
+        const auto cps = decodeUtf8("\xF0\x9F\x87\xAF\xF0\x9F\x87\xB5\xF0\x9F\x87\xAF");
+        ASSERT_EQ(cps.size(), 3u);
+        const auto boundaries = graphemeBoundaries(cps);
+        EXPECT_EQ(boundaries[1], 0) << "the second regional indicator completes the flag";
+        EXPECT_EQ(boundaries[2], 1) << "a third starts a new flag";
+    }
+
+    // Skin tone modifiers attach to the preceding emoji.
+    {
+        const auto cps = decodeUtf8("\xF0\x9F\x91\x8D\xF0\x9F\x8F\xBD");
+        ASSERT_EQ(cps.size(), 2u);
+        EXPECT_EQ(graphemeBoundaries(cps)[1], 0);
+    }
+
+    // Line breaks: allowed between ideographs, forbidden before closing
+    // punctuation (kinsoku).
+    {
+        const auto cps = decodeUtf8("\xE4\xBD\xA0\xE5\xA5\xBD\xE3\x80\x82"); // 你好。
+        ASSERT_EQ(cps.size(), 3u);
+        const auto breaks = lineBreakOpportunities(cps);
+        EXPECT_EQ(breaks[1], 1) << "a break is allowed between two ideographs";
+        EXPECT_EQ(breaks[2], 0) << "a full stop must not start a line";
+    }
+
+    // Latin breaks after a space, not mid-word.
+    {
+        const auto cps = decodeUtf8("ab cd");
+        const auto breaks = lineBreakOpportunities(cps);
+        EXPECT_EQ(breaks[1], 0);
+        EXPECT_EQ(breaks[3], 1) << "break after the space";
+        EXPECT_EQ(breaks[4], 0);
+    }
+
+    // Malformed UTF-8 degrades to a replacement character rather than vanishing.
+    {
+        const auto cps = decodeUtf8("a\xFF\x62");
+        ASSERT_EQ(cps.size(), 3u);
+        EXPECT_EQ(cps[0].value, uint32_t('a'));
+        EXPECT_EQ(cps[1].value, 0xFFFDu);
+        EXPECT_EQ(cps[2].value, uint32_t('b'));
+    }
+}
+
 TEST(CpuText, MissingFontFailsAtTheInterface)
 {
     // The native interface reports failure for a family that does not exist...
