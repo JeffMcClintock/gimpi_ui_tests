@@ -18,6 +18,7 @@
 
 #include "Drawing.h"
 #include "backends/CpuGfx.h"
+#include "helpers/DecodeImage.h" // platform image decoding, injected into the CPU factory
 #include "helpers/SavePng.h"
 #include "DrawingTestContext.h"
 
@@ -279,6 +280,83 @@ TEST(CpuBackend, ReviewRegressions)
     auto bmp = rt.getBitmap();
     expectPixel(bmp, 10, 10, kRed);   // rendering survived the unbalanced pops
     expectPixel(bmp, 45, 45, kWhite); // hollow figure not filled
+}
+
+#if GMPI_UI_HAVE_IMAGE_DECODER
+// Deliberately cross-platform: this is the check that alpha survives a PNG
+// round trip, and each platform encodes differently. Windows hands the encoder
+// straight alpha; macOS has no straight-alpha 8-bit RGBA bitmap context, so it
+// hands CoreGraphics premultiplied pixels and relies on ImageIO to convert when
+// writing (PNG itself has no premultiplied form). That reliance is exactly the
+// assumption that proved FALSE on Windows — WIC was told the buffer was
+// premultiplied and wrote those bytes into the file verbatim, saving every
+// translucent pixel too dark. So this test must run everywhere, not just where
+// the bug was first found.
+TEST(CpuBackend, PngAlphaRoundTrip)
+{
+    CpuTestContext ctx; // initialises COM on Windows, which WIC needs
+    ctx.factoryImpl.imageDecoder = gmpi::drawing::decodeImageFile;
+
+    const auto path = std::filesystem::path(REFERENCE_IMAGES_DIR) / "cpu_backend_preview" / "x_alpha_roundtrip.png";
+
+    {
+        auto rt = ctx.createRenderTarget(4, 1);
+        rt.beginDraw();
+        rt.clear(Color{ 0.0f, 0.0f, 0.0f, 0.0f });
+        const Color colors[4] = { Colors::Red, Colors::Lime, Colors::Blue,
+                                  Color{ 1.0f, 1.0f, 1.0f, 0.5f } };
+        for (int i = 0; i < 4; ++i)
+        {
+            auto brush = rt.createSolidColorBrush(colors[i]);
+            rt.fillRectangle({ float(i), 0.f, float(i) + 1.f, 1.f }, brush);
+        }
+        rt.endDraw();
+        auto bmp = rt.getBitmap();
+        ASSERT_TRUE(savePng(path, bmp));
+    }
+
+    auto loaded = ctx.factory.loadImageU(path.string());
+    ASSERT_NE(AccessPtr::get(loaded), nullptr) << "loadImageU failed";
+    ASSERT_EQ(loaded.getSize().width, 4u);
+
+    auto px = loaded.lockPixels(BitmapLockFlags::Read);
+    const uint16_t* row = reinterpret_cast<const uint16_t*>(px.getAddress());
+    const auto at = [&](int x, int c) { return detail::halfToFloat(row[x * 4 + c]); };
+
+    // Opaque primaries survive intact.
+    expectPixel(loaded, 0, 0, kRed);
+    EXPECT_NEAR(at(1, 1), 1.0f, 0.01f);
+    EXPECT_NEAR(at(2, 2), 1.0f, 0.01f);
+
+    // The one that catches a premultiplied encode: half-alpha WHITE. Stored
+    // premultiplied, so colour lands at alpha (0.5). If the encoder wrote
+    // premultiplied bytes into the PNG, the file holds 50% grey instead of
+    // white and this reads back at roughly 0.11 after the sRGB decode.
+    EXPECT_NEAR(at(3, 3), 0.5f, 0.02f) << "alpha channel corrupted by the PNG round trip";
+    EXPECT_NEAR(at(3, 0), 0.5f, 0.02f)
+        << "colour darkened by the PNG round trip: the encoder is writing premultiplied "
+           "bytes into PNG, which has no premultiplied form";
+}
+
+TEST(CpuBackend, LoadImageFailsCleanly)
+{
+    CpuTestContext ctx;
+    ctx.factoryImpl.imageDecoder = gmpi::drawing::decodeImageFile;
+
+    auto missing = ctx.factory.loadImageU(
+        (std::filesystem::path(REFERENCE_IMAGES_DIR) / "no_such_file.png").string());
+    EXPECT_EQ(AccessPtr::get(missing), nullptr);
+}
+#endif // GMPI_UI_HAVE_IMAGE_DECODER
+
+TEST(CpuBackend, LoadImageWithoutDecoderReportsNoSupport)
+{
+    // The backend contains no platform code of its own, so with nothing wired
+    // it must decline rather than crash.
+    gmpi::cpugfx::Factory bare;
+    gmpi::drawing::api::IBitmap* raw{};
+    EXPECT_EQ(bare.loadImageU("anything.png", &raw), gmpi::ReturnCode::NoSupport);
+    EXPECT_EQ(raw, nullptr);
 }
 
 TEST(CpuBackend, FillContainsPoint)
