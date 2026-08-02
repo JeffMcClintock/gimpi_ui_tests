@@ -49,6 +49,29 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
+# HarfBuzz — shaping plus glyph outlines plus colour-glyph access, which is
+# what CJK and emoji need. Built the way JUCE builds it: one amalgamation
+# source file, no HarfBuzz build system involved. A shipping product vendors
+# these sources; fetching them here keeps the test build reproducible.
+# ---------------------------------------------------------------------------
+FetchContent_Declare(
+    harfbuzz
+    GIT_REPOSITORY https://github.com/harfbuzz/harfbuzz
+    GIT_TAG        14.2.1
+    GIT_SHALLOW    ON
+    SOURCE_SUBDIR  do-not-configure   # we compile the amalgamation ourselves
+)
+FetchContent_MakeAvailable(harfbuzz)
+
+add_library(gmpi_harfbuzz STATIC ${harfbuzz_SOURCE_DIR}/src/harfbuzz.cc)
+target_include_directories(gmpi_harfbuzz PUBLIC ${harfbuzz_SOURCE_DIR}/src)
+target_compile_definitions(gmpi_harfbuzz PUBLIC HB_NO_MT)
+set_target_properties(gmpi_harfbuzz PROPERTIES CXX_STANDARD 17)
+if(MSVC)
+    target_compile_options(gmpi_harfbuzz PRIVATE /wd4244 /wd4267 /wd4996 /bigobj)
+endif()
+
+# ---------------------------------------------------------------------------
 # GoogleTest
 # ---------------------------------------------------------------------------
 FetchContent_Declare(
@@ -82,6 +105,10 @@ add_executable(gmpi_ui_tests
     tests/drawing_tests.cpp
     tests/text_tests.cpp
     tests/layout_tests.cpp
+    tests/cpu_backend_tests.cpp
+    tests/cpu_vs_d2d_tests.cpp
+    tests/cpu_text_tests.cpp
+    tests/drawing_math_tests.cpp
     ${DRAWING_TEST_CONTEXT_SRC}
     ${GMPI_UI_SDK}/backends/DirectXGfx.cpp
     ${GMPI_UI_SDK}/experimental/grid.cpp
@@ -136,6 +163,7 @@ if(APPLE)
 elseif(WIN32)
     target_link_libraries(gmpi_ui_tests PRIVATE
         gtest_main
+        gmpi_harfbuzz
         d2d1
         dwrite
         WindowsCodecs

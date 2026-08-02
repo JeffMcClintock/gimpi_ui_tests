@@ -5,6 +5,8 @@ out/
 # Test failure artefacts (not reference images)
 reference_images/*_actual.png
 reference_images/*_diff.log
+# CPU-backend preview renders + cross-backend failure dumps (regenerated per run)
+reference_images/cpu_backend_preview/
 .DS_Store
 .claude/settings.local.json
 .DS_Store
