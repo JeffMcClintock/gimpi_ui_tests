@@ -11,13 +11,18 @@
 
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <string>
+#include <vector>
 
 #include "Drawing.h"
 #include "backends/CpuGfx.h"
 #include "helpers/CpuTextEngine.h"
+#include "helpers/DecodeImage.h"
 #include "helpers/FontProvider.h"
 #include "helpers/SavePng.h"
+
+#include <hb-ot.h>
 
 #ifdef _WIN32
 #include <objbase.h>
@@ -46,6 +51,7 @@ struct TextContext
 #ifdef _WIN32
         CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 #endif
+        engine.imageDecoder = gmpi::drawing::decodeImageMemory; // colour emoji PNGs
         factoryImpl.textEngine = &engine;
         *AccessPtr::put(factory) = &factoryImpl;
     }
@@ -519,6 +525,173 @@ TEST(CpuText, SegmentationClassifiesClustersAndBreaks)
         EXPECT_EQ(cps[1].value, 0xFFFDu);
         EXPECT_EQ(cps[2].value, uint32_t('b'));
     }
+}
+
+// --- Stage C: bitmap colour glyphs (CBDT/sbix) -----------------------------
+
+namespace
+{
+constexpr const char* kGrinningFace = "\xF0\x9F\x98\x80";  // U+1F600
+constexpr const char* kThumbsUpTone = "\xF0\x9F\x91\x8D\xF0\x9F\x8F\xBD"; // 👍 + medium skin tone
+
+// Which colour-glyph tables the machine's emoji font actually carries. This
+// decides what is testable here: Apple Color Emoji is sbix and Noto Color
+// Emoji has historically been CBDT (both PNG, stage C), while Segoe UI Emoji
+// on Windows is COLR/CPAL vector (stage D).
+struct ColorFontReport { bool found{}, png{}, layers{}, paint{}; std::string family; };
+
+ColorFontReport probeEmojiFont()
+{
+    const char* candidates[] = { "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji",
+                                 "Twemoji Mozilla", "Segoe UI Symbol" };
+    for (const char* family : candidates)
+    {
+        FontRequest request;
+        request.familyName = family;
+        request.mustCoverCodepoint = 0x1F600;
+        FontData data;
+        if (!findFont(request, data) || !data)
+            continue;
+
+        hb_blob_t* blob = hb_blob_create(reinterpret_cast<const char*>(data.bytes.data()),
+                                         unsigned(data.bytes.size()), HB_MEMORY_MODE_READONLY, nullptr, nullptr);
+        hb_face_t* face = hb_face_create(blob, data.faceIndex);
+        ColorFontReport report;
+        report.found = true;
+        report.family = family;
+        report.png = hb_ot_color_has_png(face) != 0;
+        report.layers = hb_ot_color_has_layers(face) != 0;
+        report.paint = hb_ot_color_has_paint(face) != 0;
+        hb_face_destroy(face);
+        hb_blob_destroy(blob);
+        return report;
+    }
+    return {};
+}
+} // namespace
+
+TEST(CpuText, ReportsEmojiFontColourFormat)
+{
+    // Informational, and it decides which stage covers emoji on this platform.
+    const auto report = probeEmojiFont();
+    if (!report.found)
+        GTEST_SKIP() << "no emoji font found";
+
+    std::cout << "  [EMOJI] " << report.family
+              << ": PNG(CBDT/sbix)=" << report.png
+              << " COLRv0 layers=" << report.layers
+              << " COLRv1 paint=" << report.paint << "\n";
+
+    EXPECT_TRUE(report.png || report.layers || report.paint)
+        << report.family << " has no colour glyph table at all";
+}
+
+TEST(CpuText, DecodesImagesFromMemory)
+{
+    // The decode-from-memory path is what colour glyphs use, since a font
+    // carries its PNGs as blobs rather than files. Verify it independently of
+    // whether this machine's emoji font happens to use PNG glyphs.
+    TextContext ctx; // for COM on Windows
+    const auto path = std::filesystem::path(REFERENCE_IMAGES_DIR) / "cpu_backend_preview" / "text_memdecode.png";
+
+    {
+        auto rt = ctx.makeTarget(4, 2);
+        rt.beginDraw();
+        rt.clear(Color{ 0.0f, 0.0f, 0.0f, 0.0f });
+        auto red = rt.createSolidColorBrush(Colors::Red);
+        rt.fillRectangle({ 0.f, 0.f, 2.f, 2.f }, red);
+        auto halfBlue = rt.createSolidColorBrush(Color{ 0.0f, 0.0f, 1.0f, 0.5f });
+        rt.fillRectangle({ 2.f, 0.f, 4.f, 2.f }, halfBlue);
+        rt.endDraw();
+        auto bmp = rt.getBitmap();
+        ASSERT_TRUE(savePng(path, bmp));
+    }
+
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    ASSERT_TRUE(file);
+    const auto size = file.tellg();
+    std::vector<uint8_t> bytes(static_cast<size_t>(size)); // not size_t(size): most vexing parse
+    file.seekg(0);
+    ASSERT_TRUE(file.read(reinterpret_cast<char*>(bytes.data()), size));
+
+    gmpi::drawing::DecodedImage fromMemory;
+    ASSERT_TRUE(gmpi::drawing::decodeImageMemory(bytes.data(), bytes.size(), fromMemory));
+    ASSERT_TRUE(static_cast<bool>(fromMemory));
+    EXPECT_EQ(fromMemory.width, 4u);
+    EXPECT_EQ(fromMemory.height, 2u);
+
+    // Must agree with the file decoder, byte for byte.
+    gmpi::drawing::DecodedImage fromFile;
+    ASSERT_TRUE(gmpi::drawing::decodeImageFile(path, fromFile));
+    ASSERT_EQ(fromMemory.pixels.size(), fromFile.pixels.size());
+    EXPECT_EQ(fromMemory.pixels, fromFile.pixels) << "memory and file decoders disagree";
+
+    // Straight alpha, as the contract requires: opaque red, then blue at half alpha.
+    EXPECT_EQ(fromMemory.pixels[0], 255); // R
+    EXPECT_EQ(fromMemory.pixels[3], 255); // A
+    EXPECT_NEAR(fromMemory.pixels[8 + 2], 255, 2); // B of the translucent half
+    EXPECT_NEAR(fromMemory.pixels[8 + 3], 128, 2); // its alpha
+
+    // Garbage in must fail rather than crash.
+    gmpi::drawing::DecodedImage junk;
+    const uint8_t rubbish[] = { 1, 2, 3, 4, 5, 6, 7, 8 };
+    EXPECT_FALSE(gmpi::drawing::decodeImageMemory(rubbish, sizeof(rubbish), junk));
+    EXPECT_FALSE(gmpi::drawing::decodeImageMemory(nullptr, 0, junk));
+}
+
+TEST(CpuText, RendersEmojiSequenceAsOneCluster)
+{
+    // Regardless of colour format, an emoji must shape as a single cluster:
+    // 👍 plus a skin-tone modifier is one glyph, not two.
+    TextContext ctx;
+    auto format = ctx.makeFormat(28.0f, "Arial"); // fallback finds the emoji font
+    ASSERT_NE(AccessPtr::get(format), nullptr);
+
+    const auto single = format.getTextExtentU(kGrinningFace);
+    const auto toned = format.getTextExtentU(kThumbsUpTone);
+    EXPECT_GT(single.width, 0.0f) << "emoji produced no advance";
+    EXPECT_LT(toned.width, single.width * 1.9f)
+        << "a skin-tone modifier should compose, not add a second full glyph";
+}
+
+TEST(CpuText, DrawsBitmapColourEmoji)
+{
+    const auto report = probeEmojiFont();
+    if (!report.found)
+        GTEST_SKIP() << "no emoji font found";
+    if (!report.png)
+        GTEST_SKIP() << report.family << " uses COLR vector glyphs, not PNG — that is stage D";
+
+    TextContext ctx;
+    auto format = ctx.makeFormat(32.0f, "Arial");
+    ASSERT_NE(AccessPtr::get(format), nullptr);
+
+    auto rt = ctx.makeTarget(64, 64);
+    rt.beginDraw();
+    rt.clear(Colors::White);
+    auto black = rt.createSolidColorBrush(Colors::Black);
+    rt.drawTextU(kGrinningFace, format, { 2.f, 2.f, 62.f, 62.f }, black);
+    rt.endDraw();
+
+    auto bmp = rt.getBitmap();
+    EXPECT_GT(inkFraction(bmp), 0.02f) << "no emoji pixels";
+
+    // Colour glyphs carry their own colour: the result must not be monochrome.
+    auto px = bmp.lockPixels(BitmapLockFlags::Read);
+    bool sawColour = false;
+    for (int y = 0; y < 64 && !sawColour; ++y)
+    {
+        const uint16_t* row = reinterpret_cast<const uint16_t*>(px.getAddress() + size_t(y) * px.getBytesPerRow());
+        for (int x = 0; x < 64; ++x)
+        {
+            const float r = detail::halfToFloat(row[x * 4 + 0]);
+            const float g = detail::halfToFloat(row[x * 4 + 1]);
+            const float b = detail::halfToFloat(row[x * 4 + 2]);
+            if (std::fabs(r - g) > 0.1f || std::fabs(g - b) > 0.1f) { sawColour = true; break; }
+        }
+    }
+    EXPECT_TRUE(sawColour) << "emoji rendered without colour — the brush was used instead of the bitmap";
+    savePng(std::filesystem::path(REFERENCE_IMAGES_DIR) / "cpu_backend_preview" / "text_emoji.png", bmp);
 }
 
 TEST(CpuText, MissingFontFailsAtTheInterface)
