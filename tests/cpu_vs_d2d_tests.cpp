@@ -499,6 +499,355 @@ TEST(CpuVsD2D, WindingBeyondTwo)
     });
 }
 
+// --- Gradients (milestone 5) ----------------------------------------------
+
+namespace
+{
+GradientstopCollection makeStops(BitmapRenderTarget& rt, std::initializer_list<Gradientstop> stops,
+                                 ExtendMode extendMode = ExtendMode::Clamp)
+{
+    return rt.createGradientstopCollection({ stops.begin(), stops.size() }, extendMode);
+}
+
+LinearGradientBrush makeLinear(BitmapRenderTarget& rt, Point start, Point end,
+                               GradientstopCollection stops, float opacity = 1.0f)
+{
+    BrushProperties props{};
+    props.opacity = opacity;
+    return rt.createLinearGradientBrush({ start, end }, props, stops);
+}
+
+RadialGradientBrush makeRadial(BitmapRenderTarget& rt, Point center, Point originOffset,
+                               float radiusX, float radiusY, GradientstopCollection stops)
+{
+    RadialGradientBrushProperties props{};
+    props.center = center;
+    props.gradientOriginOffset = originOffset;
+    props.radiusX = radiusX;
+    props.radiusY = radiusY;
+    return rt.createRadialGradientBrush(props, BrushProperties{}, stops);
+}
+} // namespace
+
+TEST(CpuVsD2D, LinearGradientBasic)
+{
+    runScene("x_grad_linear", [](BitmapRenderTarget& rt) {
+        rt.clear(Colors::White);
+        auto stops = makeStops(rt, { { 0.0f, Colors::Red }, { 1.0f, Colors::Blue } });
+        auto brush = makeLinear(rt, { 8.0f, 8.0f }, { 56.0f, 56.0f }, stops);
+        rt.fillRectangle({ 4.0f, 4.0f, 60.0f, 60.0f }, brush);
+    });
+}
+
+TEST(CpuVsD2D, LinearGradientMultiStop)
+{
+    runScene("x_grad_multistop", [](BitmapRenderTarget& rt) {
+        rt.clear(Colors::White);
+        auto stops = makeStops(rt, { { 0.0f, Colors::Red },
+                                     { 0.35f, Colors::Yellow },
+                                     { 0.5f, Colors::Lime },
+                                     { 1.0f, Colors::Navy } });
+        auto brush = makeLinear(rt, { 6.0f, 0.0f }, { 58.0f, 0.0f }, stops);
+        rt.fillRectangle({ 0.0f, 6.0f, 64.0f, 58.0f }, brush);
+    });
+}
+
+TEST(CpuVsD2D, LinearGradientWithAlpha)
+{
+    // Alpha varying across the gradient: exercises whether stop interpolation
+    // happens in straight or premultiplied colour.
+    runScene("x_grad_alpha", [](BitmapRenderTarget& rt) {
+        rt.clear(Colors::White);
+        auto stops = makeStops(rt, { { 0.0f, Color{ 1.0f, 0.0f, 0.0f, 1.0f } },
+                                     { 1.0f, Color{ 0.0f, 0.0f, 1.0f, 0.0f } } });
+        auto brush = makeLinear(rt, { 8.0f, 0.0f }, { 56.0f, 0.0f }, stops);
+        rt.fillRectangle({ 4.0f, 4.0f, 60.0f, 60.0f }, brush);
+    });
+}
+
+TEST(CpuVsD2D, LinearGradientExtendModes)
+{
+    for (const auto mode : { ExtendMode::Clamp, ExtendMode::Wrap, ExtendMode::Mirror })
+    {
+        const char* name = mode == ExtendMode::Clamp ? "x_grad_extend_clamp"
+                         : mode == ExtendMode::Wrap  ? "x_grad_extend_wrap"
+                                                     : "x_grad_extend_mirror";
+        runScene(name, [mode](BitmapRenderTarget& rt) {
+            rt.clear(Colors::White);
+            auto stops = makeStops(rt, { { 0.0f, Colors::Black }, { 1.0f, Colors::Orange } }, mode);
+            // Short axis in the middle, so the extend mode governs most pixels.
+            auto brush = makeLinear(rt, { 26.0f, 0.0f }, { 38.0f, 0.0f }, stops);
+            rt.fillRectangle({ 0.0f, 8.0f, 64.0f, 56.0f }, brush);
+        });
+    }
+}
+
+TEST(CpuVsD2D, RadialGradientBasic)
+{
+    runScene("x_grad_radial", [](BitmapRenderTarget& rt) {
+        rt.clear(Colors::White);
+        auto stops = makeStops(rt, { { 0.0f, Colors::White }, { 1.0f, Colors::DarkGreen } });
+        auto brush = makeRadial(rt, { 32.0f, 32.0f }, {}, 24.0f, 24.0f, stops);
+        rt.fillEllipse({ { 32.0f, 32.0f }, 26.0f, 26.0f }, brush);
+    });
+}
+
+TEST(CpuVsD2D, RadialGradientEllipticalWithOrigin)
+{
+    // Non-circular radii plus a focal offset: the full focal-gradient path.
+    runScene("x_grad_radial_focal", [](BitmapRenderTarget& rt) {
+        rt.clear(Colors::White);
+        auto stops = makeStops(rt, { { 0.0f, Colors::Yellow },
+                                     { 0.6f, Colors::Red },
+                                     { 1.0f, Colors::Black } });
+        auto brush = makeRadial(rt, { 32.0f, 32.0f }, { -9.0f, -6.0f }, 26.0f, 18.0f, stops);
+        rt.fillRectangle({ 2.0f, 8.0f, 62.0f, 56.0f }, brush);
+    });
+}
+
+TEST(CpuVsD2D, GradientUnderTransform)
+{
+    runScene("x_grad_transform", [](BitmapRenderTarget& rt) {
+        rt.clear(Colors::White);
+        auto stops = makeStops(rt, { { 0.0f, Colors::Cyan }, { 1.0f, Colors::Magenta } });
+        auto brush = makeLinear(rt, { 0.0f, 0.0f }, { 30.0f, 0.0f }, stops);
+        const auto m = makeRotationAbout(0.6f, 32.0f, 32.0f);
+        AccessPtr::get(rt)->setTransform(&m);
+        rt.fillRectangle({ 8.0f, 8.0f, 56.0f, 56.0f }, brush);
+        const Matrix3x2 identity;
+        AccessPtr::get(rt)->setTransform(&identity);
+    });
+}
+
+TEST(CpuVsD2D, GradientBrushOpacityAndStroke)
+{
+    runScene("x_grad_stroke", [](BitmapRenderTarget& rt) {
+        rt.clear(Colors::White);
+        auto stops = makeStops(rt, { { 0.0f, Colors::Blue }, { 1.0f, Colors::Red } });
+        auto brush = makeLinear(rt, { 8.0f, 8.0f }, { 56.0f, 56.0f }, stops, 0.6f);
+        rt.drawRectangle({ 10.5f, 10.5f, 53.5f, 53.5f }, brush, 6.0f);
+        rt.drawLine({ 12.0f, 32.0f }, { 52.0f, 32.0f }, brush, 5.0f);
+    });
+}
+
+TEST(CpuVsD2D, GradientZeroRadius)
+{
+    // A zero-radius radial paints the last stop in both backends.
+    runScene("x_grad_zero_radius", [](BitmapRenderTarget& rt) {
+        rt.clear(Colors::White);
+        auto stops = makeStops(rt, { { 0.0f, Colors::Green }, { 1.0f, Colors::Purple } });
+        auto radial = makeRadial(rt, { 44.0f, 44.0f }, {}, 0.0f, 0.0f, stops);
+        rt.fillRectangle({ 34.0f, 34.0f, 60.0f, 60.0f }, radial);
+    });
+}
+
+TEST(CpuVsD2D, GradientBrushTransform)
+{
+    // BrushProperties::transform had zero coverage; this pins the compose
+    // order and direction against D2D.
+    runScene("x_grad_brush_transform", [](BitmapRenderTarget& rt) {
+        rt.clear(Colors::White);
+        auto stops = makeStops(rt, { { 0.0f, Colors::Red }, { 1.0f, Colors::Blue } });
+        BrushProperties props{};
+        props.transform = { 1.6f, 0.0f, 0.0f, 1.0f, 12.0f, 0.0f }; // scale x, then shift
+        auto brush = rt.createLinearGradientBrush({ { 0.0f, 0.0f }, { 24.0f, 0.0f } }, props, stops);
+        rt.fillRectangle({ 2.0f, 2.0f, 62.0f, 62.0f }, brush);
+    });
+}
+
+TEST(CpuVsD2D, RadialGradientFocusOutsideEllipse)
+{
+    // A diagonal origin offset beyond the ellipse: the focus must be pulled
+    // back by vector length, or the focal quadratic degenerates and paints a
+    // flat wedge.
+    runScene("x_grad_radial_focus_outside", [](BitmapRenderTarget& rt) {
+        rt.clear(Colors::White);
+        auto stops = makeStops(rt, { { 0.0f, Colors::White }, { 1.0f, Colors::Maroon } });
+        auto brush = makeRadial(rt, { 32.0f, 32.0f }, { 20.0f, 20.0f }, 22.0f, 22.0f, stops);
+        rt.fillRectangle({ 4.0f, 4.0f, 60.0f, 60.0f }, brush);
+    }, 64, 64, 2, 16.0, 40.0);
+    // A focus outside the ellipse is undefined in D2D's contract, and the two
+    // pull it back by slightly different amounts, so the highlight lands a
+    // fraction of a pixel off: 36% of pixels differ but only by mean 11.6/255,
+    // and the images are visually identical. The mean-severity limit is what
+    // makes this a real regression guard — clamping the focus per-axis instead
+    // of by vector length lets |f| exceed 1, the focal discriminant goes
+    // negative, and a wedge of the plane collapses to flat last-stop colour:
+    // FEWER pixels differ (4.1%) but far more severely (mean 41.6/255), which
+    // trips the limit below.
+}
+
+// CPU-only regression for the NaN leak the gradient review found: a singular
+// or near-singular transform makes Drawing.h's invert() (which has no
+// zero-determinant guard) produce an infinite/NaN matrix. The gradient
+// parameter then goes non-finite, and before the guard in colorAt that NaN
+// reached the blend and poisoned every pixel of the chunk-aligned span --
+// including zero-coverage pixels, permanently, since NaN * 0 is still NaN.
+TEST(CpuVsD2D, GradientSingularTransformsStayFinite)
+{
+    gmpi::cpugfx::Factory cpuImpl;
+    Factory cpuFactory;
+    *AccessPtr::put(cpuFactory) = &cpuImpl;
+
+    const auto allFinite = [](BitmapRenderTarget& target) {
+        auto bmp = target.getBitmap();
+        auto px = bmp.lockPixels(BitmapLockFlags::Read);
+        const auto size = bmp.getSize();
+        for (uint32_t y = 0; y < size.height; ++y)
+        {
+            const uint16_t* row = reinterpret_cast<const uint16_t*>(px.getAddress() + size_t(y) * px.getBytesPerRow());
+            for (uint32_t i = 0; i < size.width * 4; ++i)
+                if (!std::isfinite(detail::halfToFloat(row[i])))
+                    return false;
+        }
+        return true;
+    };
+
+    // (a) singular brush transform
+    {
+        auto rt = cpuFactory.createCpuRenderTarget({ 64, 64 }, 0);
+        rt.beginDraw();
+        rt.clear(Colors::White);
+        auto stops = makeStops(rt, { { 0.0f, Colors::Red }, { 1.0f, Colors::Blue } });
+        BrushProperties props{};
+        props.transform = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f }; // fully collapsed
+        auto brush = rt.createLinearGradientBrush({ { 8.0f, 8.0f }, { 56.0f, 56.0f } }, props, stops);
+        rt.fillRectangle({ 4.0f, 4.0f, 60.0f, 60.0f }, brush);
+        rt.endDraw();
+        EXPECT_TRUE(allFinite(rt)) << "singular brush transform leaked NaN";
+    }
+
+    // (b) near-singular brush transform (finite entries, determinant underflows)
+    {
+        auto rt = cpuFactory.createCpuRenderTarget({ 64, 64 }, 0);
+        rt.beginDraw();
+        rt.clear(Colors::White);
+        auto stops = makeStops(rt, { { 0.0f, Colors::Red }, { 1.0f, Colors::Blue } });
+        BrushProperties props{};
+        props.transform = { 1e-25f, 0.0f, 0.0f, 1e-25f, 0.0f, 0.0f };
+        auto brush = rt.createLinearGradientBrush({ { 8.0f, 8.0f }, { 56.0f, 56.0f } }, props, stops);
+        rt.fillEllipse({ { 32.0f, 32.0f }, 24.0f, 24.0f }, brush);
+        rt.endDraw();
+        EXPECT_TRUE(allFinite(rt)) << "near-singular brush transform leaked NaN";
+    }
+
+    // (c) singular CONTEXT transform: the geometry collapses to zero area, so
+    // like D2D this must paint nothing at all -- not a row of NaN.
+    {
+        auto rt = cpuFactory.createCpuRenderTarget({ 64, 64 }, 0);
+        rt.beginDraw();
+        rt.clear(Colors::White);
+        auto stops = makeStops(rt, { { 0.0f, Colors::Red }, { 1.0f, Colors::Blue } });
+        auto brush = makeLinear(rt, { 8.0f, 8.0f }, { 56.0f, 56.0f }, stops);
+        const Matrix3x2 collapsed{ 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.5f }; // flattens y
+        AccessPtr::get(rt)->setTransform(&collapsed);
+        rt.fillRectangle({ 4.0f, 4.0f, 60.0f, 60.0f }, brush);
+        const Matrix3x2 identity;
+        AccessPtr::get(rt)->setTransform(&identity);
+        rt.endDraw();
+
+        EXPECT_TRUE(allFinite(rt)) << "singular context transform leaked NaN";
+
+        auto bmp = rt.getBitmap();
+        auto px = bmp.lockPixels(BitmapLockFlags::Read);
+        const uint16_t* row0 = reinterpret_cast<const uint16_t*>(px.getAddress());
+        for (int x = 0; x < 64; ++x)
+        {
+            EXPECT_NEAR(detail::halfToFloat(row0[x * 4 + 0]), 1.0f, 1e-3f)
+                << "zero-area geometry painted pixel " << x << " of row 0";
+            EXPECT_NEAR(detail::halfToFloat(row0[x * 4 + 2]), 1.0f, 1e-3f);
+        }
+    }
+}
+
+// CPU-only regression: a single-stop gradient whose parameter goes non-finite.
+// A near-singular transform inverts to an enormous one, pushing device points
+// to infinity; Wrap then turns inf into NaN (inf - floor(inf)). Every
+// comparison in the stop search is false for NaN, which used to walk the index
+// past the end of a one-element stop vector.
+TEST(CpuVsD2D, GradientSingleStopWithNonFiniteParameter)
+{
+    gmpi::cpugfx::Factory cpuImpl;
+    Factory cpuFactory;
+    *AccessPtr::put(cpuFactory) = &cpuImpl;
+    auto rt = cpuFactory.createCpuRenderTarget({ 32, 32 }, 0);
+
+    rt.beginDraw();
+    rt.clear(Colors::White);
+
+    const Gradientstop one[] = { { 0.5f, Color{ 0.0f, 1.0f, 0.0f, 1.0f } } };
+    for (const auto mode : { ExtendMode::Clamp, ExtendMode::Wrap, ExtendMode::Mirror })
+    {
+        auto stops = rt.createGradientstopCollection(one, mode);
+        // Ordinary unit axis: t is then just the local x coordinate, so an
+        // infinite local coordinate reaches colorAt as an infinite t. (A
+        // degenerate axis would take the zero-length branch and prove nothing.)
+        auto brush = makeLinear(rt, { 0.0f, 0.0f }, { 1.0f, 0.0f }, stops);
+
+        // Near-singular transform. Drawing.h's invert has no zero-determinant
+        // guard, so 1/det overflows and the inverse is infinite — while the
+        // geometry itself still maps to finite device coordinates covering the
+        // surface, so the fill actually runs.
+        const Matrix3x2 tiny{ 1e-25f, 0.0f, 0.0f, 1e-25f, 0.0f, 0.0f };
+        AccessPtr::get(rt)->setTransform(&tiny);
+        rt.fillRectangle({ 0.0f, 0.0f, 1e27f, 1e27f }, brush);
+        const Matrix3x2 identity;
+        AccessPtr::get(rt)->setTransform(&identity);
+    }
+    rt.endDraw();
+
+    // The only requirement is that it neither reads out of bounds nor writes
+    // NaN into the surface.
+    auto bmp = rt.getBitmap();
+    auto px = bmp.lockPixels(BitmapLockFlags::Read);
+
+    // Guard against the test going vacuous: the fill must actually have run and
+    // painted the single stop's colour, rather than being skipped upstream.
+    {
+        const uint16_t* c = reinterpret_cast<const uint16_t*>(
+            px.getAddress() + size_t(16) * px.getBytesPerRow() + size_t(16) * 8);
+        EXPECT_NEAR(detail::halfToFloat(c[0]), 0.0f, 1e-3f) << "brush never ran (surface still white)";
+        EXPECT_NEAR(detail::halfToFloat(c[1]), 1.0f, 1e-3f);
+        EXPECT_NEAR(detail::halfToFloat(c[2]), 0.0f, 1e-3f);
+    }
+    for (int y = 0; y < 32; ++y)
+    {
+        const uint16_t* row = reinterpret_cast<const uint16_t*>(px.getAddress() + size_t(y) * px.getBytesPerRow());
+        for (int i = 0; i < 32 * 4; ++i)
+            ASSERT_TRUE(std::isfinite(detail::halfToFloat(row[i]))) << "non-finite pixel at row " << y;
+    }
+}
+
+// CPU-only. A zero-length linear axis is a degenerate input with no defined
+// answer, and D2D's is not worth copying: it paints a fixed neutral grey that
+// does not depend on the gradient's stops at all (measured (92,92,92) for both
+// a Green->Purple and a Green->Yellow->Purple gradient), which is an artefact
+// of its internal handling rather than a behaviour. We paint the last stop:
+// deterministic, and never NaN.
+TEST(CpuVsD2D, GradientDegenerateLinearAxisIsDeterministic)
+{
+    gmpi::cpugfx::Factory cpuImpl;
+    Factory cpuFactory;
+    *AccessPtr::put(cpuFactory) = &cpuImpl;
+    auto rt = cpuFactory.createCpuRenderTarget({ 32, 32 }, 0);
+
+    rt.beginDraw();
+    rt.clear(Colors::White);
+    auto stops = makeStops(rt, { { 0.0f, Color{ 1.0f, 0.0f, 0.0f, 1.0f } },
+                                 { 1.0f, Color{ 0.0f, 0.0f, 1.0f, 1.0f } } });
+    auto brush = makeLinear(rt, { 16.0f, 16.0f }, { 16.0f, 16.0f }, stops);
+    rt.fillRectangle({ 4.0f, 4.0f, 28.0f, 28.0f }, brush);
+    rt.endDraw();
+
+    auto bmp = rt.getBitmap();
+    auto px = bmp.lockPixels(BitmapLockFlags::Read);
+    const uint16_t* h = reinterpret_cast<const uint16_t*>(
+        px.getAddress() + size_t(16) * px.getBytesPerRow() + size_t(16) * 8);
+    EXPECT_NEAR(detail::halfToFloat(h[0]), 0.0f, 1e-3f) << "last stop is blue";
+    EXPECT_NEAR(detail::halfToFloat(h[2]), 1.0f, 1e-3f);
+    EXPECT_NEAR(detail::halfToFloat(h[3]), 1.0f, 1e-3f);
+}
+
 // --- Strokes (milestone 3) ------------------------------------------------
 
 namespace
