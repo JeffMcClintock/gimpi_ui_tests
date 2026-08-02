@@ -84,6 +84,7 @@ add_executable(gmpi_ui_tests
     tests/layout_tests.cpp
     tests/cpu_backend_tests.cpp
     tests/cpu_vs_d2d_tests.cpp
+    tests/drawing_math_tests.cpp
     ${DRAWING_TEST_CONTEXT_SRC}
     ${GMPI_UI_SDK}/backends/DirectXGfx.cpp
     ${GMPI_UI_SDK}/experimental/grid.cpp
