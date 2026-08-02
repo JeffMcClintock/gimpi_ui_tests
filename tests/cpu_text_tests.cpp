@@ -9,6 +9,7 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -1025,6 +1026,160 @@ TEST(CpuText, DegenerateLayoutInputs)
     AccessPtr::get(rt)->drawTextU("x", 1, AccessPtr::get(format), &layout, nullptr, 0);
     rt.endDraw();
     SUCCEED();
+}
+
+// --- Glyph atlas -----------------------------------------------------------
+
+TEST(CpuText, GlyphAtlasMatchesTheGeometryPath)
+{
+    // The atlas must be an optimisation, not a rendering change. Same scene
+    // both ways, compared pixel by pixel.
+    TextContext ctx;
+    const char* sample = "Hamburgefonstiv 0123";
+
+    const auto render = [&](bool atlas) {
+        ctx.engine.useGlyphAtlas = atlas;
+        auto format = ctx.makeFormat(17.0f);
+        auto rt = ctx.makeTarget(220, 40);
+        rt.beginDraw();
+        rt.clear(Colors::White);
+        auto black = rt.createSolidColorBrush(Colors::Black);
+        // Fractional origin, so sub-pixel positioning is exercised.
+        rt.drawTextU(sample, format, { 3.4f, 2.7f, 218.f, 38.f }, black);
+        rt.endDraw();
+        auto bmp = rt.getBitmap();
+        auto px = bmp.lockPixels(BitmapLockFlags::Read);
+        std::vector<float> out(220 * 40);
+        for (int y = 0; y < 40; ++y)
+        {
+            const uint16_t* row = reinterpret_cast<const uint16_t*>(px.getAddress() + size_t(y) * px.getBytesPerRow());
+            for (int x = 0; x < 220; ++x)
+                out[size_t(y) * 220 + x] = detail::halfToFloat(row[x * 4]);
+        }
+        return out;
+    };
+
+    const auto viaGeometry = render(false);
+    const auto viaAtlas = render(true);
+    ASSERT_EQ(viaGeometry.size(), viaAtlas.size());
+
+    double worst = 0.0, total = 0.0;
+    int differing = 0;
+    for (size_t i = 0; i < viaAtlas.size(); ++i)
+    {
+        const double d = std::fabs(double(viaAtlas[i]) - double(viaGeometry[i]));
+        worst = (std::max)(worst, d);
+        if (d > 0.004) { ++differing; total += d; }
+    }
+    std::cout << "  [ATLAS] differing=" << differing << "/" << viaAtlas.size()
+              << " worst=" << worst
+              << " mean(differing)=" << (differing ? total / differing : 0.0) << "\n";
+
+    // Not bit-identical by construction: the atlas quantises the glyph origin
+    // to quarter pixels (as FreeType and Skia do) while the geometry path uses
+    // the exact fraction, so origins can differ by up to an eighth of a pixel.
+    // What matters is that the difference stays at antialiasing level and is
+    // confined to glyph edges.
+    //
+    // Measured: worst 0.12, mean over differing pixels 0.05, about 9% of the
+    // image differing (roughly the proportion that is glyph edge). A whole-
+    // pixel positioning error — which an earlier version of the sub-pixel
+    // split produced by dropping the rounding carry — showed up here as worst
+    // 0.95 and mean 0.13, so these limits do catch it.
+    EXPECT_LT(worst, 0.20) << "a pixel changed far more than sub-pixel quantisation explains";
+    EXPECT_LT(total / (differing ? differing : 1), 0.10) << "differing pixels are too wrong";
+    EXPECT_LT(double(differing) / double(viaAtlas.size()), 0.15);
+}
+
+TEST(CpuText, GlyphAtlasCachesAndIsReused)
+{
+    TextContext ctx;
+    auto format = ctx.makeFormat(15.0f);
+    ASSERT_NE(AccessPtr::get(format), nullptr);
+
+    auto rt = ctx.makeTarget(200, 40);
+    rt.beginDraw();
+    rt.clear(Colors::White);
+    auto black = rt.createSolidColorBrush(Colors::Black);
+    rt.drawTextU("aaaa", format, { 2.f, 2.f, 198.f, 38.f }, black);
+    rt.endDraw();
+
+    const auto afterFirst = ctx.engine.glyphAtlasSize();
+    EXPECT_GT(afterFirst, 0u) << "nothing was cached";
+    // Four identical glyphs at the same size: at most one mask per sub-pixel
+    // position, not one per glyph occurrence.
+    EXPECT_LE(afterFirst, 4u);
+
+    // Redrawing the same string must not grow the cache.
+    rt.beginDraw();
+    rt.clear(Colors::White);
+    auto black2 = rt.createSolidColorBrush(Colors::Black);
+    rt.drawTextU("aaaa", format, { 2.f, 2.f, 198.f, 38.f }, black2);
+    rt.endDraw();
+    EXPECT_EQ(ctx.engine.glyphAtlasSize(), afterFirst) << "cache missed on a repeat draw";
+}
+
+TEST(CpuText, GlyphAtlasIsFaster)
+{
+    // The whole point of the atlas. Timing is reported rather than asserted
+    // tightly, since a Debug build and a shared machine make exact ratios
+    // meaningless — but a cache that made text SLOWER would be worth knowing.
+    TextContext ctx;
+    const char* line = "The quick brown fox jumps over the lazy dog 0123456789";
+
+    const auto timeRedraws = [&](bool atlas) {
+        ctx.engine.useGlyphAtlas = atlas;
+        auto format = ctx.makeFormat(14.0f);
+        auto rt = ctx.makeTarget(420, 30);
+        // Warm up, so font loading and (for the atlas) mask building are not
+        // counted as part of the steady-state cost.
+        rt.beginDraw();
+        auto warm = rt.createSolidColorBrush(Colors::Black);
+        rt.drawTextU(line, format, { 2.f, 2.f, 418.f, 28.f }, warm);
+        rt.endDraw();
+
+        const auto start = std::chrono::steady_clock::now();
+        constexpr int kFrames = 40;
+        for (int i = 0; i < kFrames; ++i)
+        {
+            rt.beginDraw();
+            rt.clear(Colors::White);
+            auto black = rt.createSolidColorBrush(Colors::Black);
+            rt.drawTextU(line, format, { 2.f, 2.f, 418.f, 28.f }, black);
+            rt.endDraw();
+        }
+        return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count() / kFrames;
+    };
+
+    const double geometryMs = timeRedraws(false);
+    const double atlasMs = timeRedraws(true);
+    std::cout << "  [ATLAS PERF] geometry " << geometryMs << " ms/frame, atlas "
+              << atlasMs << " ms/frame, speedup " << (geometryMs / atlasMs) << "x\n";
+
+    EXPECT_LT(atlasMs, geometryMs * 1.2) << "the glyph cache made text slower";
+}
+
+TEST(CpuText, GlyphAtlasHandlesRotationByFallingBack)
+{
+    // A rotated transform cannot use cached masks; it must still draw.
+    TextContext ctx;
+    auto format = ctx.makeFormat(20.0f);
+    ASSERT_NE(AccessPtr::get(format), nullptr);
+
+    auto rt = ctx.makeTarget(96, 96);
+    rt.beginDraw();
+    rt.clear(Colors::White);
+    auto black = rt.createSolidColorBrush(Colors::Black);
+    const float c = std::cos(0.4f), s = std::sin(0.4f);
+    const Matrix3x2 rotate{ c, s, -s, c, 20.0f, 20.0f };
+    AccessPtr::get(rt)->setTransform(&rotate);
+    rt.drawTextU("Rotated", format, { 0.f, 0.f, 90.f, 30.f }, black);
+    const Matrix3x2 identity;
+    AccessPtr::get(rt)->setTransform(&identity);
+    rt.endDraw();
+
+    auto bmp = rt.getBitmap();
+    EXPECT_GT(inkFraction(bmp), 0.005f) << "rotated text did not render";
 }
 
 TEST(CpuText, MissingFontFailsAtTheInterface)
