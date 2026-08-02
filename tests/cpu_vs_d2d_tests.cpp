@@ -382,6 +382,23 @@ TEST(CpuVsD2D, ClipGeometryIntersectsRectClip)
     });
 }
 
+TEST(CpuVsD2D, ClearRespectsGeometryClip)
+{
+    // clear() used to ignore the shaped clip and repaint its whole bounding
+    // box, so a clear under pushClipGeometry wiped out corners the clip
+    // excluded.
+    runScene("x_clip_geometry_clear", [](BitmapRenderTarget& rt) {
+        rt.clear(Colors::White);
+        auto blue = rt.createSolidColorBrush(Colors::Blue);
+        rt.fillRectangle({ 0.f, 0.f, 64.f, 64.f }, blue); // something to preserve
+
+        auto star = makeStar(rt, FillMode::Winding);
+        rt.pushClipGeometry(star);
+        rt.clear(Colors::Orange);
+        rt.popAxisAlignedClip();
+    });
+}
+
 TEST(CpuVsD2D, ClipGeometryUnderTransform)
 {
     runScene("x_clip_geometry_transform", [](BitmapRenderTarget& rt) {
