@@ -1184,13 +1184,25 @@ TEST(CpuText, GlyphAtlasHandlesRotationByFallingBack)
 
 TEST(CpuText, MissingFontFailsAtTheInterface)
 {
-    // The native interface reports failure for a family that does not exist...
     TextContext ctx;
     gmpi::drawing::api::ITextFormat* raw{};
     const auto r = ctx.factoryImpl.createTextFormat("NoSuchFontExistsAnywhere_ZZZ", FontWeight::Regular,
                                                     FontStyle::Normal, FontStretch::Normal, 12.0f, 0, &raw);
+
+#if GMPI_UI_FONT_PROVIDER_FONTCONFIG
+    // fontconfig never fails a family lookup: an unknown name is substituted
+    // with the best available match, by design. So the platform contract here
+    // genuinely differs — what must hold is that the caller gets a USABLE
+    // format rather than a half-built one.
+    EXPECT_EQ(r, gmpi::ReturnCode::Ok);
+    ASSERT_NE(raw, nullptr);
+    raw->release();
+#else
+    // DirectWrite and CoreText both report failure for a family that does not
+    // exist, which is what the wrapper's fallback chain is built on.
     EXPECT_NE(r, gmpi::ReturnCode::Ok);
     EXPECT_EQ(raw, nullptr);
+#endif
 }
 
 TEST(CpuText, WrapperFallsBackToArial)

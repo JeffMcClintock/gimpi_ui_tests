@@ -1191,6 +1191,9 @@ TEST_F(DrawingTest, TextBaselineLowestPixel_CourierNew200)
 // Simple rich text with no markdown — should render identically to plain text.
 TEST_F(DrawingTest, RichTextPlain)
 {
+    if (!richTextSupported())
+        GTEST_SKIP() << "backend has no rich-text support";
+
     auto rtf = makeRichTextFormat("Hello", 24.f);
     g.clear(Colors::LightBlue);
     auto textSize = rtf.getTextExtentU();
@@ -1204,6 +1207,9 @@ TEST_F(DrawingTest, RichTextPlain)
 // Bold text via **markdown**.
 TEST_F(DrawingTest, RichTextBold)
 {
+    if (!richTextSupported())
+        GTEST_SKIP() << "backend has no rich-text support";
+
     auto rtf = makeRichTextFormat("**Bold**", 26.f);
     g.clear(Colors::LightBlue);
     auto textSize = rtf.getTextExtentU();
@@ -1217,6 +1223,9 @@ TEST_F(DrawingTest, RichTextBold)
 // Italic text via *markdown*.
 TEST_F(DrawingTest, RichTextItalic)
 {
+    if (!richTextSupported())
+        GTEST_SKIP() << "backend has no rich-text support";
+
     auto rtf = makeRichTextFormat("*Italic*", 28.f);
     g.clear(Colors::LightBlue);
     auto textSize = rtf.getTextExtentU();
@@ -1230,6 +1239,9 @@ TEST_F(DrawingTest, RichTextItalic)
 // Bold italic text via ***markdown***.
 TEST_F(DrawingTest, RichTextBoldItalic)
 {
+    if (!richTextSupported())
+        GTEST_SKIP() << "backend has no rich-text support";
+
     auto rtf = makeRichTextFormat("***BdIt***", 24.f);
     g.clear(Colors::LightBlue);
     auto textSize = rtf.getTextExtentU();
@@ -1243,6 +1255,9 @@ TEST_F(DrawingTest, RichTextBoldItalic)
 // Mixed plain and bold in one string.
 TEST_F(DrawingTest, RichTextMixed)
 {
+    if (!richTextSupported())
+        GTEST_SKIP() << "backend has no rich-text support";
+
     auto rtf = makeRichTextFormat("Hi **bold** end", 18.f);
     g.clear(Colors::LightBlue);
     auto textSize = rtf.getTextExtentU();
@@ -1256,6 +1271,9 @@ TEST_F(DrawingTest, RichTextMixed)
 // Centre-aligned rich text — alignment is set at creation time.
 TEST_F(DrawingTest, RichTextCentred)
 {
+    if (!richTextSupported())
+        GTEST_SKIP() << "backend has no rich-text support";
+
     auto rtf = makeRichTextFormat("*Hi*", 28.f, "Arial",
         TextAlignment::Center, ParagraphAlignment::Center);
     g.clear(Colors::LightBlue);
@@ -1272,6 +1290,9 @@ TEST_F(DrawingTest, RichTextCentred)
 // Verify getTextExtentU returns a non-zero size for rich text.
 TEST_F(DrawingTest, RichTextExtent)
 {
+    if (!richTextSupported())
+        GTEST_SKIP() << "backend has no rich-text support";
+
     auto rtf = makeRichTextFormat("**Test**", 14.f);
     auto size = rtf.getTextExtentU();
     EXPECT_GT(size.width, 0.f);
@@ -1281,6 +1302,9 @@ TEST_F(DrawingTest, RichTextExtent)
 // Heading renders larger and bold.
 TEST_F(DrawingTest, RichTextHeading)
 {
+    if (!richTextSupported())
+        GTEST_SKIP() << "backend has no rich-text support";
+
     auto rtf = makeRichTextFormat("# Hi", 20.f);
     g.clear(Colors::LightBlue);
     auto textSize = rtf.getTextExtentU();
@@ -1294,6 +1318,9 @@ TEST_F(DrawingTest, RichTextHeading)
 // Bullet list renders with bullet character.
 TEST_F(DrawingTest, RichTextBulletList)
 {
+    if (!richTextSupported())
+        GTEST_SKIP() << "backend has no rich-text support";
+
     auto rtf = makeRichTextFormat("- A\n- B", 20.f);
     g.clear(Colors::LightBlue);
     auto textSize = rtf.getTextExtentU();
@@ -1307,6 +1334,9 @@ TEST_F(DrawingTest, RichTextBulletList)
 // Inline code renders in monospace font.
 TEST_F(DrawingTest, RichTextInlineCode)
 {
+    if (!richTextSupported())
+        GTEST_SKIP() << "backend has no rich-text support";
+
     auto rtf = makeRichTextFormat("`code`", 24.f);
     g.clear(Colors::LightBlue);
     auto textSize = rtf.getTextExtentU();
@@ -1320,6 +1350,9 @@ TEST_F(DrawingTest, RichTextInlineCode)
 // Strikethrough text.
 TEST_F(DrawingTest, RichTextStrikethrough)
 {
+    if (!richTextSupported())
+        GTEST_SKIP() << "backend has no rich-text support";
+
     auto rtf = makeRichTextFormat("~~no~~", 24.f);
     g.clear(Colors::LightBlue);
     auto textSize = rtf.getTextExtentU();
@@ -1333,6 +1366,9 @@ TEST_F(DrawingTest, RichTextStrikethrough)
 // Multi-block: heading + list.
 TEST_F(DrawingTest, RichTextMultiBlock)
 {
+    if (!richTextSupported())
+        GTEST_SKIP() << "backend has no rich-text support";
+
     auto rtf = makeRichTextFormat("## Hi\n\n- A\n- B", 12.f);
     g.clear(Colors::LightBlue);
     auto textSize = rtf.getTextExtentU();

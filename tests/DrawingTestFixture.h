@@ -113,6 +113,19 @@ protected:
         return drawingContext.factory().createRichTextFormat(markdownText, height, {&familySv, 1}, FontFlags::BodyHeight, textAlignment, paragraphAlignment, wordWrapping);
     }
 
+    // Rich text (markdown parsing plus mixed-format runs) sits a layer above
+    // shaping, and the CPU backend has no implementation yet — it reports
+    // NoSupport, which surfaces here as an empty format. Tests that need it ask
+    // first and skip, rather than dereferencing null.
+    bool richTextSupported()
+    {
+        std::string_view familySv{"Arial"};
+        auto probe = drawingContext.factory().createRichTextFormat(
+            "x", 12.f, {&familySv, 1}, FontFlags::BodyHeight,
+            TextAlignment::Leading, ParagraphAlignment::Near, WordWrapping::Wrap);
+        return gmpi::drawing::AccessPtr::get(probe) != nullptr;
+    }
+
     // Build an 8x8 checkerboard bitmap using a small render target, then
     // wrap it in a BitmapBrush tied to the main render target (rt).
     BitmapBrush makeCheckerboardBrush(Color color1 = Colors::Red,

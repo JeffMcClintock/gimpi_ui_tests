@@ -89,16 +89,15 @@ if(APPLE)
 elseif(WIN32)
     set(DRAWING_TEST_CONTEXT_SRC tests/DrawingTestContext.cpp)
 else()
-    # Linux: render through gmpi_ui's JUCE backend (backends/JuceGfx.h).
-    set(DRAWING_TEST_CONTEXT_SRC tests/DrawingTestContext_juce.cpp)
+    # Linux: render through gmpi_ui's pure-software backend (backends/CpuGfx.h).
+    # No GPU, no display server and no JUCE — just fontconfig for font discovery
+    # and libpng for image codecs, both of which are present on any desktop
+    # distro and installable headless.
+    set(DRAWING_TEST_CONTEXT_SRC tests/DrawingTestContext_cpu.cpp)
 
-    FetchContent_Declare(
-        juce
-        GIT_REPOSITORY https://github.com/juce-framework/JUCE
-        GIT_TAG        8.0.6
-        GIT_SHALLOW    ON
-    )
-    FetchContent_MakeAvailable(juce)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
+    pkg_check_modules(LIBPNG REQUIRED IMPORTED_TARGET libpng)
 endif()
 
 add_executable(gmpi_ui_tests
@@ -155,6 +154,7 @@ endif()
 if(APPLE)
     target_link_libraries(gmpi_ui_tests PRIVATE
         gtest_main
+        gmpi_harfbuzz   # tests/cpu_text_tests.cpp shapes with it directly
         "-framework Cocoa"
         "-framework CoreGraphics"
         "-framework ImageIO"
@@ -171,20 +171,11 @@ elseif(WIN32)
         dxgi
     )
 else()
-    # Linux: the juce modules compile into this executable (plain target:
-    # JuceGfx.h falls back to direct module includes, no generated JuceHeader.h).
     target_link_libraries(gmpi_ui_tests PRIVATE
         gtest_main
-        juce::juce_gui_basics
-        juce::juce_graphics
-        juce::juce_events
-        juce::juce_core
-    )
-    target_compile_definitions(gmpi_ui_tests PRIVATE
-        JUCE_STANDALONE_APPLICATION=1
-        JUCE_WEB_BROWSER=0
-        JUCE_USE_CURL=0
-        JUCE_DONT_SET_USING_JUCE_NAMESPACE=1
+        gmpi_harfbuzz
+        PkgConfig::FONTCONFIG
+        PkgConfig::LIBPNG
     )
 endif()
 
