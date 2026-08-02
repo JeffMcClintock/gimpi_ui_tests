@@ -135,9 +135,15 @@ TEST(CpuText, CreatesFormatAndReportsMetrics)
     EXPECT_LT(metrics.xHeight, metrics.capHeight) << "x-height must be below cap height";
     EXPECT_LT(metrics.capHeight, metrics.ascent + metrics.descent);
 
-    // BodyHeight is the default: the requested height IS ascent+descent.
-    EXPECT_NEAR(metrics.ascent + metrics.descent, 20.0f, 0.1f)
-        << "FontFlags::BodyHeight must rescale so the body height matches the request";
+    // The default (FontFlags::BodyHeight) means the requested height is the EM
+    // size, not the body height. That reads backwards from the flag's name, and
+    // it is deliberate: FontFlags::BodyHeight is 0, so the Direct2D backend's
+    // "(flags & BodyHeight) != 0" never fires and it applies no scaling either.
+    // Matching the reference backend matters more than matching the name —
+    // CpuVsD2D.TextMetricsAgreeWithDirectWrite pins them together exactly.
+    // Arial's body is about 1.117 em, so 20 gives roughly 22.3.
+    EXPECT_GT(metrics.ascent + metrics.descent, 20.0f);
+    EXPECT_LT(metrics.ascent + metrics.descent, 26.0f);
 }
 
 TEST(CpuText, CapHeightFlagRescales)
@@ -177,9 +183,15 @@ TEST(CpuText, ExplicitNewlinesMakeLines)
     auto format = ctx.makeFormat(16.0f);
     ASSERT_NE(AccessPtr::get(format), nullptr);
 
+    const auto metrics = format.getFontMetrics();
     const auto one = format.getTextExtentU("one");
     const auto three = format.getTextExtentU("one\ntwo\nthree");
-    EXPECT_NEAR(three.height, one.height * 3.0f, 0.1f);
+
+    // Each extra line adds a full advance (which includes lineGap), but there
+    // is no trailing gap after the last one — the same shape DirectWrite has.
+    const float advance = metrics.ascent + metrics.descent + metrics.lineGap;
+    EXPECT_NEAR(one.height, metrics.ascent + metrics.descent, 0.05f);
+    EXPECT_NEAR(three.height, one.height + 2.0f * advance, 0.05f);
     EXPECT_GT(three.width, one.width) << "widest line wins";
 }
 
@@ -951,6 +963,41 @@ TEST(CpuText, TextUnderTransformAndClip)
         EXPECT_LT(clipped.bottom, 10) << "text drew outside the clip";
 }
 
+TEST(CpuText, DrawTextOptionsClipConfinesToLayoutRect)
+{
+    // DrawTextOptions::Clip was accepted and ignored, so overlong text spilled
+    // out of its layout rectangle on this backend but not on Direct2D.
+    TextContext ctx;
+    auto format = ctx.makeFormat(22.0f);
+    ASSERT_NE(AccessPtr::get(format), nullptr);
+    AccessPtr::get(format)->setWordWrapping(WordWrapping::NoWrap);
+
+    const Rect layout{ 4.f, 4.f, 40.f, 40.f };
+    const char* overflowing = "MMMMMMMMMMMM";
+
+    const auto render = [&](int32_t options) {
+        auto rt = ctx.makeTarget(96, 48);
+        rt.beginDraw();
+        rt.clear(Colors::White);
+        auto black = rt.createSolidColorBrush(Colors::Black);
+        AccessPtr::get(rt)->drawTextU(overflowing, uint32_t(std::char_traits<char>::length(overflowing)),
+                                      AccessPtr::get(format), &layout, AccessPtr::get(black), options);
+        rt.endDraw();
+        auto bmp = rt.getBitmap();
+        return inkBounds(bmp);
+    };
+
+    const auto unclipped = render(DrawTextOptions::None);
+    ASSERT_TRUE(unclipped.any());
+    EXPECT_GT(unclipped.right, int(layout.right))
+        << "the sample text must overflow, or this test proves nothing";
+
+    const auto clipped = render(DrawTextOptions::Clip);
+    ASSERT_TRUE(clipped.any()) << "clipping removed everything";
+    EXPECT_LE(clipped.right, int(layout.right))
+        << "text drew past the right edge of its layout rect despite Clip";
+}
+
 TEST(CpuText, DegenerateLayoutInputs)
 {
     TextContext ctx;
@@ -1002,7 +1049,9 @@ TEST(CpuText, WrapperFallsBackToArial)
     ASSERT_NE(AccessPtr::get(format), nullptr) << "wrapper should have fallen back";
 
     const auto metrics = format.getFontMetrics();
-    EXPECT_NEAR(metrics.ascent + metrics.descent, 20.0f, 0.1f);
+    EXPECT_GT(metrics.ascent, 0.0f);
+    EXPECT_GT(metrics.descent, 0.0f);
+    EXPECT_GT(format.getTextExtentU("Hi").width, 0.0f) << "the fallback format must be usable";
 }
 
 TEST(CpuText, WithoutTextEngineReportsNoSupport)

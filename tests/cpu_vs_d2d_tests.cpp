@@ -23,7 +23,9 @@
 
 #include "Drawing.h"
 #include "backends/CpuGfx.h"
+#include "helpers/CpuTextEngine.h"
 #include "helpers/DecodeImage.h" // platform image decoding, injected into the CPU factory
+#include "helpers/FontProvider.h"
 #include "helpers/SavePng.h"
 #include "DrawingTestContext.h"
 
@@ -567,6 +569,62 @@ TEST(CpuVsD2D, WindingBeyondTwo)
             rt.fillGeometry(geometry, brush);
         }
     });
+}
+
+// --- Text metrics vs DirectWrite -------------------------------------------
+//
+// Text PIXELS are not comparable across backends (different rasterizers), but
+// metrics and layout are: hosts position UI against them, so a disagreement
+// here shifts real interfaces.
+
+TEST(CpuVsD2D, TextMetricsAgreeWithDirectWrite)
+{
+    DrawingTestContext d2d;
+
+    gmpi::cpugfx::Factory cpuImpl;
+    gmpi::drawing::CpuTextEngine engine{ gmpi::drawing::findFont };
+    cpuImpl.textEngine = &engine;
+    Factory cpuFactory;
+    *AccessPtr::put(cpuFactory) = &cpuImpl;
+
+    constexpr float kHeight = 20.0f;
+    std::string_view family{ "Arial" };
+
+    auto d2dFormat = d2d.factory().createTextFormat(kHeight, { &family, 1 });
+    auto cpuFormat = cpuFactory.createTextFormat(kHeight, { &family, 1 });
+    ASSERT_NE(AccessPtr::get(d2dFormat), nullptr);
+    ASSERT_NE(AccessPtr::get(cpuFormat), nullptr);
+
+    const auto dm = d2dFormat.getFontMetrics();
+    const auto cm = cpuFormat.getFontMetrics();
+    std::cout << "  [METRICS] ascent " << cm.ascent << " vs " << dm.ascent
+              << " | descent " << cm.descent << " vs " << dm.descent
+              << " | lineGap " << cm.lineGap << " vs " << dm.lineGap
+              << " | capHeight " << cm.capHeight << " vs " << dm.capHeight
+              << " | xHeight " << cm.xHeight << " vs " << dm.xHeight << "\n";
+
+    EXPECT_NEAR(cm.ascent, dm.ascent, 0.15f);
+    EXPECT_NEAR(cm.descent, dm.descent, 0.15f);
+    EXPECT_NEAR(cm.lineGap, dm.lineGap, 0.15f);
+    EXPECT_NEAR(cm.capHeight, dm.capHeight, 0.15f);
+    EXPECT_NEAR(cm.xHeight, dm.xHeight, 0.15f);
+
+    // Single-line advance width: same font, same shaper input.
+    const auto dWidth = d2dFormat.getTextExtentU("Hello, world").width;
+    const auto cWidth = cpuFormat.getTextExtentU("Hello, world").width;
+    std::cout << "  [EXTENT] width " << cWidth << " vs " << dWidth << "\n";
+    EXPECT_NEAR(cWidth, dWidth, 0.6f);
+
+    // Line-to-line spacing — this is what lineGap decides.
+    const char* samples[4] = { "a", "a\nb", "a\nb\nc", "a\nb\nc\nd" };
+    for (int i = 0; i < 4; ++i)
+    {
+        const auto dh = d2dFormat.getTextExtentU(samples[i]).height;
+        const auto ch = cpuFormat.getTextExtentU(samples[i]).height;
+        std::cout << "  [LINES] n=" << (i + 1) << " cpu " << ch << " d2d " << dh
+                  << " (d2d delta " << (i ? dh - d2dFormat.getTextExtentU(samples[i - 1]).height : dh) << ")\n";
+        EXPECT_NEAR(ch, dh, 0.2f) << "line " << (i + 1) << " height disagrees";
+    }
 }
 
 // --- Bitmaps (milestone 6) ------------------------------------------------
