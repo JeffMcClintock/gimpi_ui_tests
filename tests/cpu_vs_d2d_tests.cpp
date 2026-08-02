@@ -23,6 +23,7 @@
 
 #include "Drawing.h"
 #include "backends/CpuGfx.h"
+#include "helpers/DecodeImage.h" // platform image decoding, injected into the CPU factory
 #include "helpers/SavePng.h"
 #include "DrawingTestContext.h"
 
@@ -137,6 +138,7 @@ void runScene(const std::string& name,
 
     // Software backend.
     gmpi::cpugfx::Factory cpuImpl;
+    cpuImpl.imageDecoder = gmpi::drawing::decodeImageFile;
     Factory cpuFactory;
     *AccessPtr::put(cpuFactory) = &cpuImpl;
     auto rtCpu = cpuFactory.createCpuRenderTarget({ width, height }, 0);
@@ -496,6 +498,313 @@ TEST(CpuVsD2D, WindingBeyondTwo)
             sink.close();
             rt.fillGeometry(geometry, brush);
         }
+    });
+}
+
+// --- Bitmaps (milestone 6) ------------------------------------------------
+
+namespace
+{
+// An asymmetric tile: prime dimensions and four distinguishable regions, so a
+// one-pixel phase error in tiling or sampling is visible rather than hidden by
+// self-similarity.
+Bitmap makeAnchorTile(BitmapRenderTarget& rt)
+{
+    constexpr uint32_t w = 11, h = 7;
+    auto tileRT = rt.getFactory().createCpuRenderTarget({ w, h }, 0);
+    tileRT.beginDraw();
+    tileRT.clear(Colors::Cyan);
+    auto top = tileRT.createSolidColorBrush(Colors::Blue);
+    auto left = tileRT.createSolidColorBrush(Colors::Green);
+    auto anchor = tileRT.createSolidColorBrush(Colors::Red);
+    tileRT.fillRectangle({ 0.f, 0.f, float(w), 1.f }, top);
+    tileRT.fillRectangle({ 0.f, 0.f, 1.f, float(h) }, left);
+    tileRT.fillRectangle({ 0.f, 0.f, 1.f, 1.f }, anchor);
+    tileRT.endDraw();
+    return tileRT.getBitmap();
+}
+} // namespace
+
+TEST(CpuVsD2D, DrawBitmapNativeSize)
+{
+    runScene("x_bmp_native", [](BitmapRenderTarget& rt) {
+        rt.clear(Colors::White);
+        auto bmp = makeAnchorTile(rt);
+        rt.drawBitmap(bmp, { 20.f, 20.f, 31.f, 27.f }, { 0.f, 0.f, 11.f, 7.f },
+                      1.0f, BitmapInterpolationMode::NearestNeighbor);
+    });
+}
+
+TEST(CpuVsD2D, DrawBitmapStretchedNearest)
+{
+    runScene("x_bmp_stretch_nearest", [](BitmapRenderTarget& rt) {
+        rt.clear(Colors::White);
+        auto bmp = makeAnchorTile(rt);
+        rt.drawBitmap(bmp, { 4.f, 4.f, 60.f, 60.f }, { 0.f, 0.f, 11.f, 7.f },
+                      1.0f, BitmapInterpolationMode::NearestNeighbor);
+    });
+}
+
+TEST(CpuVsD2D, DrawBitmapStretchedLinear)
+{
+    runScene("x_bmp_stretch_linear", [](BitmapRenderTarget& rt) {
+        rt.clear(Colors::White);
+        auto bmp = makeAnchorTile(rt);
+        rt.drawBitmap(bmp, { 4.f, 4.f, 60.f, 60.f }, { 0.f, 0.f, 11.f, 7.f },
+                      1.0f, BitmapInterpolationMode::Linear);
+    }, 64, 64, 2, 14.0, 12.0); // edge-clamp behaviour at the borders differs slightly
+}
+
+TEST(CpuVsD2D, DrawBitmapCropped)
+{
+    // A sub-rectangle must not bleed in neighbouring texels.
+    runScene("x_bmp_cropped", [](BitmapRenderTarget& rt) {
+        rt.clear(Colors::White);
+        auto bmp = makeAnchorTile(rt);
+        rt.drawBitmap(bmp, { 8.f, 8.f, 56.f, 56.f }, { 4.f, 2.f, 9.f, 6.f },
+                      1.0f, BitmapInterpolationMode::NearestNeighbor);
+    });
+}
+
+TEST(CpuVsD2D, DrawBitmapOpacity)
+{
+    runScene("x_bmp_opacity", [](BitmapRenderTarget& rt) {
+        rt.clear(Colors::White);
+        auto bmp = makeAnchorTile(rt);
+        rt.drawBitmap(bmp, { 6.f, 6.f, 58.f, 58.f }, { 0.f, 0.f, 11.f, 7.f },
+                      0.45f, BitmapInterpolationMode::NearestNeighbor);
+    });
+}
+
+TEST(CpuVsD2D, DrawBitmapFractionalAndTransformed)
+{
+    runScene("x_bmp_transformed", [](BitmapRenderTarget& rt) {
+        rt.clear(Colors::White);
+        auto bmp = makeAnchorTile(rt);
+        const auto m = makeRotationAbout(0.4f, 32.0f, 32.0f);
+        AccessPtr::get(rt)->setTransform(&m);
+        rt.drawBitmap(bmp, { 10.3f, 12.7f, 53.6f, 45.2f }, { 0.f, 0.f, 11.f, 7.f },
+                      1.0f, BitmapInterpolationMode::NearestNeighbor);
+        const Matrix3x2 identity;
+        AccessPtr::get(rt)->setTransform(&identity);
+    });
+}
+
+TEST(CpuVsD2D, BitmapBrushTiles)
+{
+    // The bitmap brush wraps in both axes; the anchor tile exposes the phase.
+    runScene("x_bmp_brush_tile", [](BitmapRenderTarget& rt) {
+        rt.clear(Colors::White);
+        auto bmp = makeAnchorTile(rt);
+        auto brush = rt.createBitmapBrush(bmp);
+        rt.fillRectangle({ 4.f, 4.f, 60.f, 60.f }, brush);
+    });
+}
+
+TEST(CpuVsD2D, BitmapBrushUnderTransform)
+{
+    // Tiling must follow the active transform, so the lattice moves with it.
+    runScene("x_bmp_brush_transform", [](BitmapRenderTarget& rt) {
+        rt.clear(Colors::White);
+        auto bmp = makeAnchorTile(rt);
+        auto brush = rt.createBitmapBrush(bmp);
+        const Matrix3x2 m{ 1.0f, 0.0f, 0.0f, 1.0f, 6.5f, 3.25f };
+        AccessPtr::get(rt)->setTransform(&m);
+        rt.fillEllipse({ { 28.f, 28.f }, 22.f, 22.f }, brush);
+        const Matrix3x2 identity;
+        AccessPtr::get(rt)->setTransform(&identity);
+    });
+}
+
+TEST(CpuVsD2D, BitmapBrushStrokesGeometry)
+{
+    runScene("x_bmp_brush_stroke", [](BitmapRenderTarget& rt) {
+        rt.clear(Colors::White);
+        auto bmp = makeAnchorTile(rt);
+        auto brush = rt.createBitmapBrush(bmp);
+        rt.drawRectangle({ 10.f, 10.f, 54.f, 54.f }, brush, 7.0f);
+    });
+}
+
+// CPU-only regressions for the defects the bitmap review confirmed.
+TEST(CpuVsD2D, BitmapDegenerateInputsAreSafe)
+{
+    gmpi::cpugfx::Factory cpuImpl;
+    Factory cpuFactory;
+    *AccessPtr::put(cpuFactory) = &cpuImpl;
+    auto rt = cpuFactory.createCpuRenderTarget({ 32, 32 }, 0);
+
+    rt.beginDraw();
+    rt.clear(Colors::White);
+    auto tile = makeAnchorTile(rt);
+
+    // (a) Inverted source rectangle. Legal input that mirrors the image, but
+    // it used to reach std::clamp with lo > hi — undefined, and fatal in an
+    // MSVC debug build.
+    rt.drawBitmap(tile, { 2.f, 2.f, 14.f, 14.f }, { 9.f, 6.f, 2.f, 1.f },
+                  1.0f, BitmapInterpolationMode::Linear);
+
+    // (b) Inverted destination rectangle.
+    rt.drawBitmap(tile, { 30.f, 18.f, 18.f, 30.f }, { 0.f, 0.f, 11.f, 7.f },
+                  1.0f, BitmapInterpolationMode::NearestNeighbor);
+
+    // (c) A bitmap brush with a near-collapsed transform: source coordinates
+    // go far outside int range, and float-to-int is undefined there. The wrap
+    // reduction has to happen in float first.
+    {
+        BrushProperties props{};
+        props.transform = { 1e-20f, 0.0f, 0.0f, 1e-20f, 0.0f, 0.0f };
+        gmpi::drawing::api::IBitmapBrush* rawBrush{};
+        AccessPtr::get(rt)->createBitmapBrush(AccessPtr::get(tile), &props, &rawBrush);
+        ASSERT_NE(rawBrush, nullptr);
+        BitmapBrush brush;
+        *AccessPtr::put(brush) = rawBrush;
+        rt.fillRectangle({ 16.f, 2.f, 30.f, 16.f }, brush);
+    }
+    rt.endDraw();
+
+    // Nothing may be non-finite anywhere on the surface.
+    auto bmp = rt.getBitmap();
+    auto px = bmp.lockPixels(BitmapLockFlags::Read);
+    for (int y = 0; y < 32; ++y)
+    {
+        const uint16_t* row = reinterpret_cast<const uint16_t*>(px.getAddress() + size_t(y) * px.getBytesPerRow());
+        for (int i = 0; i < 32 * 4; ++i)
+            ASSERT_TRUE(std::isfinite(detail::halfToFloat(row[i]))) << "non-finite pixel at row " << y;
+    }
+}
+
+TEST(CpuVsD2D, NonFiniteSourceTexelDoesNotEscape)
+{
+    // A caller can write anything through lockPixels. A non-finite texel must
+    // not reach the blend, where it would poison even zero-coverage pixels
+    // permanently (NaN * 0 is still NaN).
+    gmpi::cpugfx::Factory cpuImpl;
+    Factory cpuFactory;
+    *AccessPtr::put(cpuFactory) = &cpuImpl;
+
+    auto srcRT = cpuFactory.createCpuRenderTarget({ 4, 4 }, 0);
+    srcRT.beginDraw();
+    srcRT.clear(Colors::Red);
+    srcRT.endDraw();
+    auto src = srcRT.getBitmap();
+    {
+        auto px = src.lockPixels(BitmapLockFlags::ReadWrite);
+        uint16_t* row = reinterpret_cast<uint16_t*>(px.getAddress());
+        row[0] = 0x7e00; // half-precision NaN
+        row[5] = 0x7c00; // half-precision +infinity
+    }
+
+    auto rt = cpuFactory.createCpuRenderTarget({ 32, 32 }, 0);
+    rt.beginDraw();
+    rt.clear(Colors::White);
+    rt.drawBitmap(src, { 8.f, 8.f, 24.f, 24.f }, { 0.f, 0.f, 4.f, 4.f },
+                  1.0f, BitmapInterpolationMode::Linear);
+    rt.endDraw();
+
+    auto bmp = rt.getBitmap();
+    auto px = bmp.lockPixels(BitmapLockFlags::Read);
+    for (int y = 0; y < 32; ++y)
+    {
+        const uint16_t* row = reinterpret_cast<const uint16_t*>(px.getAddress() + size_t(y) * px.getBytesPerRow());
+        for (int i = 0; i < 32 * 4; ++i)
+            ASSERT_TRUE(std::isfinite(detail::halfToFloat(row[i]))) << "non-finite pixel at row " << y;
+    }
+    // A pixel well outside the drawn rectangle must still be the background.
+    const uint16_t* corner = reinterpret_cast<const uint16_t*>(px.getAddress());
+    EXPECT_NEAR(detail::halfToFloat(corner[0]), 1.0f, 1e-3f);
+    EXPECT_NEAR(detail::halfToFloat(corner[3]), 1.0f, 1e-3f);
+}
+
+// loadImageU goes through the injected platform decoder. Render a known
+// pattern, encode it, decode it back, and check the colours survive the
+// sRGB -> linear -> premultiplied conversions.
+TEST(CpuVsD2D, LoadImageRoundTrip)
+{
+    DrawingTestContext comInit; // savePng and WIC both need COM on this thread
+
+    gmpi::cpugfx::Factory cpuImpl;
+    cpuImpl.imageDecoder = gmpi::drawing::decodeImageFile;
+    Factory cpuFactory;
+    *AccessPtr::put(cpuFactory) = &cpuImpl;
+
+    const std::filesystem::path path =
+        std::filesystem::path(REFERENCE_IMAGES_DIR) / "cpu_backend_preview" / "x_load_roundtrip.png";
+
+    // Opaque primaries plus a half-transparent pixel, so alpha is exercised too.
+    {
+        auto rt = cpuFactory.createCpuRenderTarget({ 4, 1 }, 0);
+        rt.beginDraw();
+        rt.clear(Color{ 0.0f, 0.0f, 0.0f, 0.0f });
+        const Color colors[4] = { Colors::Red, Colors::Lime, Colors::Blue,
+                                  Color{ 1.0f, 1.0f, 1.0f, 0.5f } };
+        for (int i = 0; i < 4; ++i)
+        {
+            auto brush = rt.createSolidColorBrush(colors[i]);
+            rt.fillRectangle({ float(i), 0.f, float(i) + 1.f, 1.f }, brush);
+        }
+        rt.endDraw();
+        auto bmp = rt.getBitmap();
+        ASSERT_TRUE(savePng(path, bmp));
+    }
+
+    auto loaded = cpuFactory.loadImageU(path.string());
+    ASSERT_NE(AccessPtr::get(loaded), nullptr) << "loadImageU failed";
+    const auto size = loaded.getSize();
+    EXPECT_EQ(size.width, 4u);
+    EXPECT_EQ(size.height, 1u);
+
+    auto px = loaded.lockPixels(BitmapLockFlags::Read);
+    const uint16_t* row = reinterpret_cast<const uint16_t*>(px.getAddress());
+    const auto at = [&](int x, int c) { return detail::halfToFloat(row[x * 4 + c]); };
+
+    // Stored premultiplied linear: opaque primaries keep full intensity.
+    EXPECT_NEAR(at(0, 0), 1.0f, 0.01f); EXPECT_NEAR(at(0, 1), 0.0f, 0.01f); EXPECT_NEAR(at(0, 3), 1.0f, 0.01f);
+    EXPECT_NEAR(at(1, 1), 1.0f, 0.01f); EXPECT_NEAR(at(1, 0), 0.0f, 0.01f);
+    EXPECT_NEAR(at(2, 2), 1.0f, 0.01f); EXPECT_NEAR(at(2, 0), 0.0f, 0.01f);
+    // Half-alpha white: premultiplied, so colour lands at alpha.
+    EXPECT_NEAR(at(3, 3), 0.5f, 0.02f);
+    EXPECT_NEAR(at(3, 0), 0.5f, 0.02f);
+}
+
+TEST(CpuVsD2D, LoadImageMissingFileFails)
+{
+    gmpi::cpugfx::Factory cpuImpl;
+    cpuImpl.imageDecoder = gmpi::drawing::decodeImageFile;
+    Factory cpuFactory;
+    *AccessPtr::put(cpuFactory) = &cpuImpl;
+
+    auto missing = cpuFactory.loadImageU((std::filesystem::path(REFERENCE_IMAGES_DIR) / "no_such_file.png").string());
+    EXPECT_EQ(AccessPtr::get(missing), nullptr);
+
+    // With no decoder wired at all, loadImageU must report NoSupport rather
+    // than crash — the backend itself contains no platform code.
+    gmpi::cpugfx::Factory bare;
+    gmpi::drawing::api::IBitmap* raw{};
+    EXPECT_EQ(bare.loadImageU("anything.png", &raw), gmpi::ReturnCode::NoSupport);
+    EXPECT_EQ(raw, nullptr);
+}
+
+TEST(CpuVsD2D, OffscreenRenderTargetRoundTrip)
+{
+    // createCompatibleRenderTarget: draw into an offscreen, then draw it back.
+    // This is what CachedBlur and friends depend on.
+    runScene("x_bmp_offscreen", [](BitmapRenderTarget& rt) {
+        rt.clear(Colors::White);
+        auto offscreen = rt.createCompatibleRenderTarget({ 32.f, 32.f });
+        offscreen.beginDraw();
+        offscreen.clear(Color{ 0.f, 0.f, 0.f, 0.f });
+        auto red = offscreen.createSolidColorBrush(Colors::Red);
+        offscreen.fillEllipse({ { 16.f, 16.f }, 12.f, 12.f }, red);
+        auto blue = offscreen.createSolidColorBrush(Color{ 0.f, 0.f, 1.f, 0.6f });
+        offscreen.fillRectangle({ 0.f, 0.f, 16.f, 16.f }, blue);
+        offscreen.endDraw();
+
+        auto bmp = offscreen.getBitmap();
+        rt.drawBitmap(bmp, { 8.f, 8.f, 40.f, 40.f }, { 0.f, 0.f, 32.f, 32.f },
+                      1.0f, BitmapInterpolationMode::NearestNeighbor);
+        rt.drawBitmap(bmp, { 40.f, 40.f, 56.f, 56.f }, { 0.f, 0.f, 32.f, 32.f },
+                      1.0f, BitmapInterpolationMode::NearestNeighbor);
     });
 }
 
