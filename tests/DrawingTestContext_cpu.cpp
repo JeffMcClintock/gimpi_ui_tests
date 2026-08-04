@@ -1,20 +1,28 @@
-// Pure-software implementation of DrawingTestContext (Linux, and anywhere else
-// without a platform renderer).
+// Pure-software implementation of DrawingTestContext.
 //
-// Renders through gmpi_ui's CPU backend (backends/CpuGfx.h) rather than an OS
-// graphics stack, so the drawing tests run on a headless machine with no GPU,
-// no display server and no JUCE. The three platform-shaped pieces the backend
-// deliberately does not contain are wired in here:
+// This is the DEFAULT everywhere except Windows (which renders natively,
+// because the reference images are Direct2D output). Rendering macOS and
+// Linux through one backend is what lets a single set of references describe
+// the expected result on every platform: the CPU backend reproduces Direct2D's
+// own rasterisation rather than approximating it. See DrawingTestContext.h for
+// the switch back to native.
 //
-//   fonts   helpers/FontProvider.h  (fontconfig on Linux)
-//   decode  helpers/DecodeImage.h   (libpng)
-//   shaping helpers/CpuTextEngine.h (HarfBuzz)
+// It needs no GPU, no display server and no JUCE. The three platform-shaped
+// pieces the backend deliberately does not contain are wired in here, and each
+// resolves to the host's own facility:
+//
+//   fonts   helpers/FontProvider.h  (CoreText on macOS, fontconfig on Linux)
+//   decode  helpers/DecodeImage.h   (ImageIO on macOS, libpng on Linux)
+//   shaping helpers/CpuTextEngine.h (HarfBuzz, the same everywhere)
+
+#include "DrawingTestContext.h" // decides which implementation is live
+
+#if GMPI_UI_TESTS_BACKEND_CPU
 
 #include "backends/CpuGfx.h"
 #include "helpers/CpuTextEngine.h"
 #include "helpers/DecodeImage.h"
 #include "helpers/FontProvider.h"
-#include "DrawingTestContext.h"
 
 struct DrawingTestContext::Impl
 {
@@ -45,3 +53,5 @@ gmpi::drawing::BitmapRenderTarget DrawingTestContext::createCpuRenderTarget(gmpi
 {
     return impl_->factory.createCpuRenderTarget(size, flags, dpi);
 }
+
+#endif // GMPI_UI_TESTS_BACKEND_CPU

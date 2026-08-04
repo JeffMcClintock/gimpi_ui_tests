@@ -84,8 +84,22 @@ FetchContent_MakeAvailable(googletest)
 # ---------------------------------------------------------------------------
 # Test executable
 # ---------------------------------------------------------------------------
+# Which renderer the tests use. OFF (default) puts macOS on the shared CPU
+# backend, so the Direct2D reference images describe the expected result on
+# every platform; ON restores the Cocoa backend there. Windows always renders
+# natively — it is the anchor that re-proves the references. See
+# tests/DrawingTestContext.h for the full reasoning.
+option(GMPI_UI_TESTS_NATIVE_BACKEND
+    "Render the drawing tests through each platform's native backend (Cocoa on macOS) instead of the shared CPU backend"
+    OFF)
+
 if(APPLE)
-    set(DRAWING_TEST_CONTEXT_SRC tests/DrawingTestContext.mm)
+    # BOTH are compiled; the macro decides which one has a body, so flipping it
+    # needs no CMake change. CoreText and ImageIO supply the CPU backend's font
+    # discovery and image decoding, and are linked below either way.
+    set(DRAWING_TEST_CONTEXT_SRC
+        tests/DrawingTestContext.mm
+        tests/DrawingTestContext_cpu.cpp)
 elseif(WIN32)
     set(DRAWING_TEST_CONTEXT_SRC tests/DrawingTestContext.cpp)
 else()
@@ -141,6 +155,7 @@ file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/fonts" FONTS_PATH)
 target_compile_definitions(gmpi_ui_tests PRIVATE
     REFERENCE_IMAGES_DIR="${REF_IMAGES_PATH}"
     FONTS_DIR="${FONTS_PATH}"
+    GMPI_UI_TESTS_NATIVE_BACKEND=$<BOOL:${GMPI_UI_TESTS_NATIVE_BACKEND}>
     UNICODE
     _UNICODE
     $<$<CONFIG:Debug>:_DEBUG>

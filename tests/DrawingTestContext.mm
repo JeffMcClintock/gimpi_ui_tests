@@ -1,6 +1,16 @@
+// Cocoa implementation of DrawingTestContext.
+//
+// Compiled on macOS but INACTIVE by default: the tests render through the
+// shared CPU backend so that one set of Direct2D reference images describes
+// the expected result on every platform. Set GMPI_UI_TESTS_NATIVE_BACKEND=1
+// to make this the live implementation again — see DrawingTestContext.h.
+
+#include "DrawingTestContext.h" // decides which implementation is live
+
+#if !GMPI_UI_TESTS_BACKEND_CPU
+
 #import <Cocoa/Cocoa.h>
 #import "backends/CocoaGfx.h"
-#include "DrawingTestContext.h"
 
 struct DrawingTestContext::Impl
 {
@@ -25,3 +35,5 @@ gmpi::drawing::BitmapRenderTarget DrawingTestContext::createCpuRenderTarget(gmpi
 {
     return impl_->factory.createCpuRenderTarget(size, flags, dpi);
 }
+
+#endif // !GMPI_UI_TESTS_BACKEND_CPU
