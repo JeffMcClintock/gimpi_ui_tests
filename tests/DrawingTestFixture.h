@@ -24,7 +24,7 @@
 #include <sstream>
 #include <string>
 
-#include "Drawing.h"
+#include "GmpiUiDrawing.h" // not "Drawing.h": SynthEditLib has one of those too
 #include "helpers/BundledFonts.h"
 #include "helpers/SavePng.h"
 #include "DrawingTestContext.h"

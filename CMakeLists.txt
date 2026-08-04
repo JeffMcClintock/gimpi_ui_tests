@@ -145,7 +145,6 @@ file(GLOB GMPI_UI_HEADERS
 target_sources(gmpi_ui_tests PRIVATE
     tests/DrawingTestFixture.h
     tests/DrawingTestContext.h
-    tests/DrawingTestBackend.h
     ${GMPI_UI_HEADERS}
 )
 

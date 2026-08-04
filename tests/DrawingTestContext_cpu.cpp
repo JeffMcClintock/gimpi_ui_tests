@@ -4,7 +4,7 @@
 // because the reference images are Direct2D output). Rendering macOS and
 // Linux through one backend is what lets a single set of references describe
 // the expected result on every platform: the CPU backend reproduces Direct2D's
-// own rasterisation rather than approximating it. See DrawingTestBackend.h for
+// own rasterisation rather than approximating it. See DrawingTestContext.h for
 // the switch back to native.
 //
 // It needs no GPU, no display server and no JUCE. The three platform-shaped
@@ -15,19 +15,14 @@
 //   decode  helpers/DecodeImage.h   (ImageIO on macOS, libpng on Linux)
 //   shaping helpers/CpuTextEngine.h (HarfBuzz, the same everywhere)
 
-#include "DrawingTestBackend.h" // no includes of its own - see the note there
+#include "DrawingTestContext.h" // decides which implementation is live
 
 #if GMPI_UI_TESTS_BACKEND_CPU
 
-// CpuGfx.h first: it reaches gmpi_ui's Drawing.h by relative path, which is the
-// only unambiguous way to get it. DrawingTestContext.h asks for "Drawing.h" by
-// bare name, and consumers with SynthEditLib on their include path (SE16's
-// synth_ui_tests) resolve that to se_sdk3/Drawing.h instead.
 #include "backends/CpuGfx.h"
 #include "helpers/CpuTextEngine.h"
 #include "helpers/DecodeImage.h"
 #include "helpers/FontProvider.h"
-#include "DrawingTestContext.h"
 
 struct DrawingTestContext::Impl
 {
