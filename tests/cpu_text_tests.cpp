@@ -18,6 +18,7 @@
 
 #include "Drawing.h"
 #include "backends/CpuGfx.h"
+#include "helpers/BundledFonts.h"
 #include "helpers/CpuTextEngine.h"
 #include "helpers/DecodeImage.h"
 #include "helpers/FontProvider.h"
@@ -36,10 +37,21 @@ using namespace gmpi::drawing;
 namespace
 {
 
-// A font every platform in CI actually has. Arial on Windows/macOS;
-// fontconfig substitutes Liberation Sans on most Linux boxes, whose metrics
-// differ — which is exactly why pixel comparisons are off the table.
-constexpr const char* kTestFont = "Arial";
+// A font every platform in CI actually has: Selawik, bundled in fonts/ and
+// registered below, rather than relying on whatever the OS happens to ship.
+constexpr const char* kTestFont = "Selawik";
+
+struct SelawikFontRegistration
+{
+    SelawikFontRegistration()
+    {
+        const std::string fontsDir = FONTS_DIR;
+        gmpi::drawing::registerBundledFont("Selawik", gmpi::drawing::FontWeight::Regular,
+            gmpi::drawing::FontStyle::Normal, fontsDir + "/Selawik-Regular.ttf");
+        gmpi::drawing::registerBundledFont("Selawik", gmpi::drawing::FontWeight::Bold,
+            gmpi::drawing::FontStyle::Normal, fontsDir + "/Selawik-Bold.ttf");
+    }
+} g_selawikFontRegistration;
 
 struct TextContext
 {
@@ -142,9 +154,10 @@ TEST(CpuText, CreatesFormatAndReportsMetrics)
     // "(flags & BodyHeight) != 0" never fires and it applies no scaling either.
     // Matching the reference backend matters more than matching the name —
     // CpuVsD2D.TextMetricsAgreeWithDirectWrite pins them together exactly.
-    // Arial's body is about 1.117 em, so 20 gives roughly 22.3.
+    // Selawik's body is about 1.33 em (usWinAscent+usWinDescent / unitsPerEm),
+    // so 20 gives roughly 26.6.
     EXPECT_GT(metrics.ascent + metrics.descent, 20.0f);
-    EXPECT_LT(metrics.ascent + metrics.descent, 26.0f);
+    EXPECT_LT(metrics.ascent + metrics.descent, 28.0f);
 }
 
 TEST(CpuText, CapHeightFlagRescales)
@@ -388,10 +401,10 @@ constexpr const char* kAccented = "e\xCC\x81";                                 /
 
 TEST(CpuText, FallsBackForUncoveredScript)
 {
-    // Arial has no CJK. Without fallback these become .notdef boxes or nothing;
+    // Selawik has no CJK. Without fallback these become .notdef boxes or nothing;
     // with it, a covering font is found automatically.
     TextContext ctx;
-    auto format = ctx.makeFormat(24.0f, "Arial");
+    auto format = ctx.makeFormat(24.0f, kTestFont);
     ASSERT_NE(AccessPtr::get(format), nullptr);
 
     const auto latin = format.getTextExtentU("ab");
@@ -419,7 +432,7 @@ TEST(CpuText, CjkWrapsBetweenCharacters)
 {
     // CJK has no spaces, so a space-only line breaker cannot wrap it at all.
     TextContext ctx;
-    auto format = ctx.makeFormat(20.0f, "Arial");
+    auto format = ctx.makeFormat(20.0f, kTestFont);
     ASSERT_NE(AccessPtr::get(format), nullptr);
     AccessPtr::get(format)->setWordWrapping(WordWrapping::Wrap);
 
@@ -657,7 +670,7 @@ TEST(CpuText, RendersEmojiSequenceAsOneCluster)
     // Regardless of colour format, an emoji must shape as a single cluster:
     // 👍 plus a skin-tone modifier is one glyph, not two.
     TextContext ctx;
-    auto format = ctx.makeFormat(28.0f, "Arial"); // fallback finds the emoji font
+    auto format = ctx.makeFormat(28.0f, kTestFont); // fallback finds the emoji font
     ASSERT_NE(AccessPtr::get(format), nullptr);
 
     const auto single = format.getTextExtentU(kGrinningFace);
@@ -676,7 +689,7 @@ TEST(CpuText, DrawsBitmapColourEmoji)
         GTEST_SKIP() << report.family << " uses COLR vector glyphs, not PNG — that is stage D";
 
     TextContext ctx;
-    auto format = ctx.makeFormat(32.0f, "Arial");
+    auto format = ctx.makeFormat(32.0f, kTestFont);
     ASSERT_NE(AccessPtr::get(format), nullptr);
 
     auto rt = ctx.makeTarget(64, 64);
@@ -718,7 +731,7 @@ TEST(CpuText, DrawsColrColourEmoji)
         GTEST_SKIP() << report.family << " has no COLRv1 paint table";
 
     TextContext ctx;
-    auto format = ctx.makeFormat(40.0f, "Arial"); // fallback finds the emoji font
+    auto format = ctx.makeFormat(40.0f, kTestFont); // fallback finds the emoji font
     ASSERT_NE(AccessPtr::get(format), nullptr);
 
     auto rt = ctx.makeTarget(64, 64);
@@ -756,7 +769,7 @@ TEST(CpuText, MixedLatinCjkAndEmojiInOneString)
     // The whole text stack in one line: Latin from the requested font, CJK and
     // emoji found by fallback, the emoji in full colour, laid out together.
     TextContext ctx;
-    auto format = ctx.makeFormat(30.0f, "Arial");
+    auto format = ctx.makeFormat(30.0f, kTestFont);
     ASSERT_NE(AccessPtr::get(format), nullptr);
 
     const char* mixed = "Hi \xE4\xBD\xA0\xE5\xA5\xBD \xF0\x9F\x98\x80"; // Hi 你好 😀
@@ -782,7 +795,7 @@ TEST(CpuText, ColourEmojiDoesNotLeakClipState)
         GTEST_SKIP() << "no COLRv1 emoji font";
 
     TextContext ctx;
-    auto format = ctx.makeFormat(24.0f, "Arial");
+    auto format = ctx.makeFormat(24.0f, kTestFont);
     auto rt = ctx.makeTarget(64, 64);
 
     rt.beginDraw();
@@ -827,12 +840,12 @@ TEST(CpuText, FallbackDoesNotStickToLaterLatin)
     // font: measured before the fix, "<emoji> Hello 2024" itemised as ONE
     // Segoe UI Emoji run.
     //
-    // Assert FONT IDENTITY, not width. Width is a useless detector here: at
-    // this size Yu Gothic UI and Segoe UI Emoji both measure "Hello 2024"
-    // within about 1px of Arial, so the wrong font reads as almost the right
-    // width while the letterforms are completely different.
+    // Assert FONT IDENTITY, not width. Width is a useless detector here:
+    // fallback faces like Yu Gothic UI or Segoe UI Emoji can measure "Hello
+    // 2024" close enough to the primary font that the wrong font reads as
+    // almost the right width while the letterforms are completely different.
     TextContext ctx;
-    auto format = ctx.makeFormat(20.0f, "Arial");
+    auto format = ctx.makeFormat(20.0f, kTestFont);
     ASSERT_NE(AccessPtr::get(format), nullptr);
 
     auto* fmt = dynamic_cast<gmpi::drawing::CpuTextFormat*>(AccessPtr::get(format));
@@ -877,7 +890,7 @@ TEST(CpuText, FallbackSharesOneCopyPerFontFile)
     // multi-megabyte font file. Rendering a lot of distinct CJK must not blow
     // memory up; this would previously allocate ~40 copies of the CJK font.
     TextContext ctx;
-    auto format = ctx.makeFormat(16.0f, "Arial");
+    auto format = ctx.makeFormat(16.0f, kTestFont);
     ASSERT_NE(AccessPtr::get(format), nullptr);
 
     // 40 distinct CJK codepoints.

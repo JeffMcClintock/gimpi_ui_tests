@@ -137,8 +137,10 @@ target_sources(gmpi_ui_tests PRIVATE
 # Pass the absolute path to reference images as a compile-time string.
 # Use forward slashes so it works as a C string literal on Windows too.
 file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/reference_images" REF_IMAGES_PATH)
+file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/fonts" FONTS_PATH)
 target_compile_definitions(gmpi_ui_tests PRIVATE
     REFERENCE_IMAGES_DIR="${REF_IMAGES_PATH}"
+    FONTS_DIR="${FONTS_PATH}"
     UNICODE
     _UNICODE
     $<$<CONFIG:Debug>:_DEBUG>

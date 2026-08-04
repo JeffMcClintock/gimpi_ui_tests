@@ -25,6 +25,7 @@
 #include <string>
 
 #include "Drawing.h"
+#include "helpers/BundledFonts.h"
 #include "helpers/SavePng.h"
 #include "DrawingTestContext.h"
 
@@ -33,6 +34,25 @@ using namespace gmpi::drawing::Colors;
 
 // Set DrawTextOptions::noMacSmooth to suppress Mac font smoothing (e.g. to compare against Windows references).
 static constexpr int32_t kTextOptions = DrawTextOptions::None;
+
+// Registers the bundled Selawik font before any DrawingTestContext (and so
+// any backend Factory) is constructed. Selawik is metrics-compatible with
+// Segoe UI and, unlike Arial, is bundled rather than relying on whatever
+// happens to be installed — the same font file renders on every dev machine
+// and CI runner, on every backend (see helpers/BundledFonts.h).
+namespace {
+struct SelawikFontRegistration
+{
+    SelawikFontRegistration()
+    {
+        const std::string fontsDir = FONTS_DIR;
+        gmpi::drawing::registerBundledFont("Selawik", gmpi::drawing::FontWeight::Regular,
+            gmpi::drawing::FontStyle::Normal, fontsDir + "/Selawik-Regular.ttf");
+        gmpi::drawing::registerBundledFont("Selawik", gmpi::drawing::FontWeight::Bold,
+            gmpi::drawing::FontStyle::Normal, fontsDir + "/Selawik-Bold.ttf");
+    }
+} g_selawikFontRegistration;
+} // namespace
 
 // ============================================================
 // DrawingTest fixture
@@ -87,10 +107,11 @@ protected:
     }
 
     // Create a TextFormat via the wrapper factory.
-    // Defaults to Arial so results are consistent across Windows machines.
+    // Defaults to Selawik (bundled, see SelawikFontRegistration above) so
+    // results are consistent across every machine, not just Windows ones.
     TextFormat makeTextFormat(
         float height,
-        const char*        family  = "Arial",
+        const char*        family  = "Selawik",
         FontWeight         weight  = FontWeight::Regular,
         FontStyle          style   = FontStyle::Normal,
         FontStretch        stretch = FontStretch::Normal,
@@ -104,7 +125,7 @@ protected:
     RichTextFormat makeRichTextFormat(
         std::string_view markdownText,
         float height,
-        const char*        family  = "Arial",
+        const char*        family  = "Selawik",
         TextAlignment      textAlignment      = TextAlignment::Leading,
         ParagraphAlignment paragraphAlignment = ParagraphAlignment::Near,
         WordWrapping       wordWrapping       = WordWrapping::Wrap)
@@ -119,7 +140,7 @@ protected:
     // first and skip, rather than dereferencing null.
     bool richTextSupported()
     {
-        std::string_view familySv{"Arial"};
+        std::string_view familySv{"Selawik"};
         auto probe = drawingContext.factory().createRichTextFormat(
             "x", 12.f, {&familySv, 1}, FontFlags::BodyHeight,
             TextAlignment::Leading, ParagraphAlignment::Near, WordWrapping::Wrap);

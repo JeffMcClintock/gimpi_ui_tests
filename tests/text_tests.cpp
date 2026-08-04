@@ -23,7 +23,7 @@ TEST_F(DrawingTest, DrawTextSimple)
 
 TEST_F(DrawingTest, DrawTextSimpleBodyHeight)
 {
-    auto tf = makeTextFormat(24.f, "Arial", FontWeight::Regular, FontStyle::Normal, FontStretch::Normal, FontFlags::BodyHeight);
+    auto tf = makeTextFormat(24.f, "Selawik", FontWeight::Regular, FontStyle::Normal, FontStretch::Normal, FontFlags::BodyHeight);
     g.clear(Colors::LightBlue);
     auto textSize = tf.getTextExtentU("Hello");
     auto whiteBrush = g.createSolidColorBrush(Colors::White);
@@ -53,7 +53,7 @@ TEST_F(DrawingTest, DrawTextCentred)
 // Bold weight text.
 TEST_F(DrawingTest, DrawTextBold)
 {
-    auto tf    = makeTextFormat(12.f, "Arial", FontWeight::Bold);
+    auto tf    = makeTextFormat(12.f, "Selawik", FontWeight::Bold);
     g.clear(Colors::LightBlue);
     auto textSize = tf.getTextExtentU("Bold");
     auto whiteBrush = g.createSolidColorBrush(Colors::White);
@@ -300,7 +300,7 @@ TEST_F(DrawingTest, FontMetricsVisual)
     const gmpi::drawing::Rect layoutRect{4.f, ascenderY, W, descenderY};
     bigRT.drawTextU("Hfgx", tf, layoutRect, textBrush, kTextOptions);
 
-    // ---- labels (small Arial, right-aligned, matching line colour) ----
+    // ---- labels (small Selawik, right-aligned, matching line colour) ----
     auto labelTF = makeTextFormat(9.f);
     labelTF.setTextAlignment(TextAlignment::Leading);
     FontMetrics labelFm = labelTF.getFontMetrics();
@@ -474,7 +474,7 @@ TEST_F(DrawingTest, MultilineParagraphAlignCenterBodyHeight)
     bigRT.beginDraw();
     bigRT.clear(Colors::LightBlue);
 
-    auto tf = makeTextFormat(30.f, "Arial", FontWeight::Regular, FontStyle::Normal, FontStretch::Normal, FontFlags::BodyHeight);
+    auto tf = makeTextFormat(30.f, "Selawik", FontWeight::Regular, FontStyle::Normal, FontStretch::Normal, FontFlags::BodyHeight);
     tf.setParagraphAlignment(ParagraphAlignment::Center);
     auto textSize = tf.getTextExtentU(kMultilineText);
     auto whiteBrush = bigRT.createSolidColorBrush(Colors::White);
@@ -913,7 +913,7 @@ TEST_F(DrawingTest, TextBaselines200)
 static int runBaselineLowestPixelTest(DrawingTestContext& drawingContext,
     std::function<TextFormat(float)> makeTextFormat,
     float dpi,
-    const char* fontName = "Arial")
+    const char* fontName = "Selawik")
 {
     const float dpiScale = dpi / 96.0f;
 
@@ -1088,11 +1088,9 @@ TEST_F(DrawingTest, TextBaselineLowestPixel125)
     auto makeTF = [this](float h) { return makeTextFormat(h); };
     int errors = runBaselineLowestPixelTest(drawingContext, makeTF, 120.0f);
 
-#ifdef _WIN32
-    constexpr int expectedErrors = 28; // 28 errors at 120 DPI due to rounding edge cases in D2D's snapping logic
-#else
-	constexpr int expectedErrors = 0; // macOS predictions are exact after calibration
-#endif
+    // Selawik hits 0 at 120 DPI on every platform; Arial's Windows rounding
+    // edge cases (28 errors) don't reproduce with Selawik's metrics.
+    constexpr int expectedErrors = 0;
 
     EXPECT_EQ(errors, expectedErrors) << errors << " baseline prediction(s) were wrong at 120 DPI";
 }
@@ -1274,7 +1272,7 @@ TEST_F(DrawingTest, RichTextCentred)
     if (!richTextSupported())
         GTEST_SKIP() << "backend has no rich-text support";
 
-    auto rtf = makeRichTextFormat("*Hi*", 28.f, "Arial",
+    auto rtf = makeRichTextFormat("*Hi*", 28.f, "Selawik",
         TextAlignment::Center, ParagraphAlignment::Center);
     g.clear(Colors::LightBlue);
     auto textSize = rtf.getTextExtentU();
@@ -1451,7 +1449,7 @@ TEST_F(DrawingTest, TextBaselineGridBodyHeight)
     for (int col = 0; col < nSizes; ++col)
     {
         const float fontSize = fontSizes[col];
-        auto tf = makeTextFormat(fontSize, "Arial", FontWeight::Regular, FontStyle::Normal, FontStretch::Normal, FontFlags::BodyHeight);
+        auto tf = makeTextFormat(fontSize, "Selawik", FontWeight::Regular, FontStyle::Normal, FontStretch::Normal, FontFlags::BodyHeight);
         tf.setWordWrapping(WordWrapping::NoWrap);
 
         const float x = col * colWidth;

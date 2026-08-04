@@ -226,7 +226,7 @@ TEST_F(DrawingTest, TransparentText)
     auto bgBrush   = g.createSolidColorBrush(Colors::Tomato);
     auto textBrush = g.createSolidColorBrush(colorFromHex(0xFFFFFFu, 0.6f)); // 60% white
     g.fillRectangle({0.f, 0.f, 64.f, 64.f}, bgBrush);
-    auto tf = makeTextFormat(46.f, "Arial", FontWeight::Regular, FontStyle::Normal, FontStretch::Normal, FontFlags::BodyHeight);
+    auto tf = makeTextFormat(46.f, "Selawik", FontWeight::Regular, FontStyle::Normal, FontStretch::Normal, FontFlags::BodyHeight);
     tf.setTextAlignment(TextAlignment::Center);
     tf.setParagraphAlignment(ParagraphAlignment::Center);
     g.drawTextU("Ag", tf, {0.f, 0.f, 64.f, 64.f}, textBrush, kTextOptions);
