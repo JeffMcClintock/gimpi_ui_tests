@@ -11,6 +11,9 @@ jobs:
     name: Build and Test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
+      # One platform's failure should not cancel the other's run — the Windows
+      # (Direct2D) result is meaningful even while macOS has known failures.
+      fail-fast: false
       matrix:
         os: [windows-latest, macos-latest]
 
