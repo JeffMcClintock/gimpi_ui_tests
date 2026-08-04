@@ -1099,21 +1099,21 @@ TEST(CpuText, GlyphAtlasMatchesTheGeometryPath)
     // pixel positioning error — which an earlier version of the sub-pixel
     // split produced by dropping the rounding carry — showed up here as worst
     // 0.95 and mean 0.13, so these limits do catch it.
-    // 0.28, raised from 0.20 when glyph coverage moved to a gamma-space blend
-    // to match Direct2D. This limit is NOT measuring rasteriser noise like the
-    // image tests do - it is measuring the two paths disagreeing with each
-    // other, which is a real if small inconsistency:
+    // The atlas now merges every glyph of the call into ONE coverage buffer
+    // and blends once - the same one-pass compositing the geometry path gets
+    // from its winding fill - so the old per-glyph double-blend at
+    // overlapping edges is gone (that flaw once pushed this limit to 0.28).
     //
-    //   the atlas blends each glyph separately, so where two glyphs' edges
-    //   overlap a pixel is blended twice, while the geometry path fills every
-    //   outline in one pass and blends it once. Gamma amplifies a difference
-    //   that was always there (worst was 0.12 before, under the old limit).
-    //
-    // The fix is one coverage buffer per glyph RUN rather than per glyph, which
-    // is also closer to what DirectWrite does. Until then this is loosened
-    // knowingly, not because the difference is noise.
-    EXPECT_LT(worst, 0.28) << "a pixel changed far more than sub-pixel quantisation explains";
-    EXPECT_LT(total / (differing ? differing : 1), 0.10) << "differing pixels are too wrong";
+    // What remains is sub-pixel QUANTISATION: the atlas snaps positions to a
+    // 1/4-pixel grid (kSubPixelSteps), the geometry path rasterises at the
+    // exact position, and a 1/8-pixel edge shift becomes a coverage change
+    // that the gamma-space blend amplifies at mid tones. Measured worst
+    // 0.224, mean over differing pixels 0.043 - the worst limit sits just
+    // above the quantisation floor, and the mean is the tight one: the
+    // per-glyph double-blend raised the MEAN, a whole-pixel positioning bug
+    // raises it to 0.13, and both must stay caught.
+    EXPECT_LT(worst, 0.24) << "a pixel changed far more than sub-pixel quantisation explains";
+    EXPECT_LT(total / (differing ? differing : 1), 0.05) << "differing pixels are too wrong";
     EXPECT_LT(double(differing) / double(viaAtlas.size()), 0.15);
 }
 
