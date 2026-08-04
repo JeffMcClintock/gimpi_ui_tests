@@ -131,7 +131,10 @@ TEST(CpuBackend, PentagramNonzeroVersusEvenOdd)
     // Self-intersecting 5-point star: winding number is 2 at the centre,
     // 1 in the spikes. Nonzero fills the centre; even-odd leaves it hollow.
     constexpr float pi = 3.14159265358979f;
-    Point pts[5];
+    // Qualified: macOS pulls the legacy QuickDraw ::Point in through
+    // DecodeImage.h (ImageIO -> MacTypes.h), and the using-directive above
+    // makes the bare name ambiguous there.
+    gmpi::drawing::Point pts[5];
     for (int k = 0; k < 5; ++k)
     {
         const float ang = -pi / 2.0f + float(k) * (4.0f * pi / 5.0f);
