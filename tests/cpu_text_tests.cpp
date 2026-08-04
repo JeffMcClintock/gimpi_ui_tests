@@ -307,7 +307,7 @@ TEST(CpuText, GlyphCountersAreHoles)
 TEST(CpuText, AlignmentMovesInk)
 {
     TextContext ctx;
-    const Rect layout{ 0.f, 0.f, 96.f, 48.f };
+    const gmpi::drawing::Rect layout{ 0.f, 0.f, 96.f, 48.f };
 
     const auto render = [&](TextAlignment align, ParagraphAlignment para) {
         auto rt = ctx.makeTarget();
@@ -986,7 +986,7 @@ TEST(CpuText, DrawTextOptionsClipConfinesToLayoutRect)
     ASSERT_NE(AccessPtr::get(format), nullptr);
     AccessPtr::get(format)->setWordWrapping(WordWrapping::NoWrap);
 
-    const Rect layout{ 4.f, 4.f, 40.f, 40.f };
+    const gmpi::drawing::Rect layout{ 4.f, 4.f, 40.f, 40.f };
     const char* overflowing = "MMMMMMMMMMMM";
 
     const auto render = [&](int32_t options) {
@@ -1035,7 +1035,7 @@ TEST(CpuText, DegenerateLayoutInputs)
 
     // A null brush can only be reached through the native interface, since the
     // wrapper takes a reference. It must decline rather than crash.
-    const Rect layout{ 0.f, 0.f, 32.f, 32.f };
+    const gmpi::drawing::Rect layout{ 0.f, 0.f, 32.f, 32.f };
     AccessPtr::get(rt)->drawTextU("x", 1, AccessPtr::get(format), &layout, nullptr, 0);
     rt.endDraw();
     SUCCEED();

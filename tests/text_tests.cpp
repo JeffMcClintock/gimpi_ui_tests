@@ -744,13 +744,13 @@ TEST_F(DrawingTest, TextBaselines)
         for (int i = 0; i < 100; ++i)
         {
             // clip the letter so only the bottom of the L draws
-			Rect clipRect{ x - 1, y - 2, x + 1, y + 4 };
+			gmpi::drawing::Rect clipRect{ x - 1, y - 2, x + 1, y + 4 };
 			bigRT.pushAxisAlignedClip(clipRect);
 
             // allow extra room at bottom to prevent edge affecting alignment
             const auto left = std::round(x - textSize.width * 0.5f);
             auto right = std::ceil(left + textSize.width);
-            Rect textRect{left, y - fm.ascent, right, y + fm.descent + 10.f};
+            gmpi::drawing::Rect textRect{left, y - fm.ascent, right, y + fm.descent + 10.f};
 
             brush.setColor(Colors::Black);
             bigRT.drawTextU(str, tf, textRect, brush, DrawTextOptions::NoSnap | kTextOptions);
@@ -758,7 +758,7 @@ TEST_F(DrawingTest, TextBaselines)
 			bigRT.popAxisAlignedClip();
 
             // Draw the glyph.
-            Rect snappedRect = textRect;
+            gmpi::drawing::Rect snappedRect = textRect;
 
             // Green tick at the predicted baseline.
 			const auto predictedBaseLine = predictBaseLine(bodyHeight, y);
@@ -800,7 +800,7 @@ TEST_F(DrawingTest, TextBaselines)
 
             for(int i = 0; i < 100; ++i)
             {
-                Rect clipRect{ x - 1, y - 2, x + 1, y + 4 };
+                gmpi::drawing::Rect clipRect{ x - 1, y - 2, x + 1, y + 4 };
 
                 auto scanCenterY = static_cast<int>(y);
                 int actualBaseline = scanCenterY - 99; // total failure prints -99
@@ -859,7 +859,7 @@ TEST_F(DrawingTest, TextBaselines200)
 
         for (int i = 0; i < 100; ++i)
         {
-            Rect textRect{x, y, std::ceil(x + textSize.width), y + textSize.height};
+            gmpi::drawing::Rect textRect{x, y, std::ceil(x + textSize.width), y + textSize.height};
 
             // Light-grey tick at the row's y origin.
             brush.setColor(Colors::LightGray);
@@ -867,7 +867,7 @@ TEST_F(DrawingTest, TextBaselines200)
 
             // Draw the glyph.
             brush.setColor(Colors::Black);
-            Rect snappedRect = textRect;
+            gmpi::drawing::Rect snappedRect = textRect;
 
             if ((i % 10) == 9)
                 bigRT.drawTextU("L", tf, snappedRect, brush, DrawTextOptions::NoSnap | kTextOptions);

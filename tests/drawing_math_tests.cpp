@@ -35,7 +35,7 @@ TEST(DrawingMath, InvertRoundTrips)
     expectMatrixNear(invert(inv), m, 1e-3f);
 
     // A point round-trips through the pair.
-    const Point p{ 13.5f, -4.25f };
+    const gmpi::drawing::Point p{ 13.5f, -4.25f };
     const auto there = transformPoint(m, p);
     const auto back = transformPoint(inv, there);
     EXPECT_NEAR(back.x, p.x, 1e-3f);
