@@ -174,7 +174,7 @@ void runScene(const std::string& name,
 
 void addStar(GeometrySink& sink, FillMode fillMode, float cx, float cy, float radius)
 {
-    Point pts[5];
+    gmpi::drawing::Point pts[5];
     for (int k = 0; k < 5; ++k)
     {
         const float ang = -kPi / 2.0f + float(k) * (4.0f * kPi / 5.0f);
@@ -1725,7 +1725,7 @@ TEST(CpuVsD2D, StrokeQueries)
     g->strokeContainsPoint({ 55.0f, 10.0f }, 8.0f, nullptr, nullptr, &contains);
     EXPECT_FALSE(contains) << "past the flat cap";
 
-    Rect bounds{};
+    gmpi::drawing::Rect bounds{};
     g->getWidenedBounds(8.0f, nullptr, nullptr, &bounds);
     EXPECT_NEAR(bounds.left, 10.0f, 0.01f);   // flat cap: no extension along x
     EXPECT_NEAR(bounds.right, 50.0f, 0.01f);
