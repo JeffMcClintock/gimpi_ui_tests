@@ -77,17 +77,17 @@ protected:
         return REFERENCE_IMAGES_DIR;
     }
 
-    // A platform-specific reference ("<name>_linux.png") takes precedence over
-    // the shared one: different text rasterisers legitimately differ (JUCE/
-    // FreeType on Linux vs the DirectWrite/CoreText-rendered shared images),
-    // and a per-platform reference keeps the comparison tight instead of
-    // loosening tolerances for everyone.
+    // Direct2D is THE reference, on every platform.
+    //
+    // This used to prefer a "<name>_linux.png" when one existed, on the grounds
+    // that different text rasterisers legitimately differ. In practice that
+    // meant 29 text tests silently stopped checking against D2D and started
+    // checking against whatever Linux happened to produce at the time - so a
+    // renderer that drifted looked green. Where FreeType and DirectWrite really
+    // cannot agree, widen the tolerance for that test and say why; do not swap
+    // the reference out from under it.
     static std::filesystem::path referencePath(const std::string& testName)
     {
-#if !defined(_WIN32) && !defined(__APPLE__)
-        if (auto linuxRef = referenceDir() / (testName + "_linux.png"); std::filesystem::exists(linuxRef))
-            return linuxRef;
-#endif
         return referenceDir() / (testName + ".png");
     }
 
