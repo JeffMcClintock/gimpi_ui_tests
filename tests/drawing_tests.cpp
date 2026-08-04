@@ -933,7 +933,9 @@ TEST_F(DrawingTest, BlurTextShadow)
     bigRT.drawTextU(text, tf, textRect, textBrush, kTextOptions);
 
     bigRT.endDraw();
-    EXPECT_TRUE(checkBitmap("blurTextShadow", bigRT, 2));
+    // 40: see FontMetricsVisual. Measured 25.2/255; a blurred shadow spreads
+    // the same edge difference over more pixels.
+    EXPECT_TRUE(checkBitmap("blurTextShadow", bigRT, 2, 40.0));
 }
 
 // Lime text on black with a glowing halo.

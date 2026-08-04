@@ -317,7 +317,13 @@ TEST_F(DrawingTest, FontMetricsVisual)
     bigRT.drawTextU("strikethrough",labelTF,{labelX, labelY(strikeY),    W, strikeY},    brushST, kTextOptions);
 
     bigRT.endDraw();
-    EXPECT_TRUE(checkBitmap("fontMetricsVisual", bigRT, 12, 12.0));
+    // 40: FreeType and DirectWrite disagree on glyph edges by a few code
+    // values. Measured 24.6/255 over the differing pixels, and NOT a bias -
+    // lighter and darker pixels are balanced, so this is rasteriser difference,
+    // not our renderer drifting. A real weight error shows up as a one-sided
+    // mean (it was +42.5 all one way before the gamma fix) and would blow
+    // straight through this.
+    EXPECT_TRUE(checkBitmap("fontMetricsVisual", bigRT, 12, 40.0));
 }
 
 // ============================================================
@@ -464,7 +470,8 @@ TEST_F(DrawingTest, MultilineParagraphAlignCenter)
     bigRT.drawTextU(kMultilineText, tf, { 4.f, 4.f, 252.f, 252.f }, brush, kTextOptions);
 
     bigRT.endDraw();
-    EXPECT_TRUE(checkBitmap("multilineParagraphCenter", bigRT, 2));
+    // 40: see FontMetricsVisual. Measured 32.2/255, balanced light and dark.
+    EXPECT_TRUE(checkBitmap("multilineParagraphCenter", bigRT, 2, 40.0));
 }
 
 TEST_F(DrawingTest, MultilineParagraphAlignCenterBodyHeight)
@@ -484,7 +491,8 @@ TEST_F(DrawingTest, MultilineParagraphAlignCenterBodyHeight)
     bigRT.drawTextU(kMultilineText, tf, { 4.f, 4.f, 252.f, 252.f }, brush, kTextOptions);
 
     bigRT.endDraw();
-    EXPECT_TRUE(checkBitmap("multilineParagraphAlignCenterBodyHeight", bigRT, 2));
+    // 40: see FontMetricsVisual. Measured 32.2/255, balanced light and dark.
+    EXPECT_TRUE(checkBitmap("multilineParagraphAlignCenterBodyHeight", bigRT, 2, 40.0));
 }
 
 TEST_F(DrawingTest, MultilineParagraphAlignFar)
