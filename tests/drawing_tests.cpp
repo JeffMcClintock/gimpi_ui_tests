@@ -933,9 +933,10 @@ TEST_F(DrawingTest, BlurTextShadow)
     bigRT.drawTextU(text, tf, textRect, textBrush, kTextOptions);
 
     bigRT.endDraw();
-    // 40: see FontMetricsVisual. Measured 25.2/255; a blurred shadow spreads
-    // the same edge difference over more pixels.
-    EXPECT_TRUE(checkBitmap("blurTextShadow", bigRT, 2, 40.0));
+    // Default limit again: the 25.2 this once measured was the whole string
+    // sitting one pixel above Direct2D's baseline; the CPU engine now applies
+    // the same half-pixel pre-snap the D2D backend does. Measures ~6.5.
+    EXPECT_TRUE(checkBitmap("blurTextShadow", bigRT, 2));
 }
 
 // Lime text on black with a glowing halo.

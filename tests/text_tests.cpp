@@ -30,7 +30,12 @@ TEST_F(DrawingTest, DrawTextSimpleBodyHeight)
     g.fillRectangle({ 2.f, 2.f, 2.f + textSize.width, 2.f + textSize.height }, whiteBrush);
     auto brush = g.createSolidColorBrush(Colors::Black);
     g.drawTextU("Hello", tf, { 2.f, 2.f, 62.f, 62.f }, brush);
-    EXPECT_TRUE(checkResult("drawTextSimpleBodyHeight", 2));
+    // 20: a quirk of "mean over DIFFERING pixels" — the DirectWrite-emulating
+    // renderer agrees with the reference on so many pixels that the mean is
+    // taken over the few dozen that remain (stem edges whose quarter-pixel
+    // phase Direct2D resolved the other way), and those are worth a level or
+    // two each. Differing pixels: 2.5%, down from ~8.5% before the emulation.
+    EXPECT_TRUE(checkResult("drawTextSimpleBodyHeight", 2, 20.0));
 }
 
 // Text centred horizontally and vertically in the bitmap.
@@ -317,13 +322,10 @@ TEST_F(DrawingTest, FontMetricsVisual)
     bigRT.drawTextU("strikethrough",labelTF,{labelX, labelY(strikeY),    W, strikeY},    brushST, kTextOptions);
 
     bigRT.endDraw();
-    // 40: FreeType and DirectWrite disagree on glyph edges by a few code
-    // values. Measured 24.6/255 over the differing pixels, and NOT a bias -
-    // lighter and darker pixels are balanced, so this is rasteriser difference,
-    // not our renderer drifting. A real weight error shows up as a one-sided
-    // mean (it was +42.5 all one way before the gamma fix) and would blow
-    // straight through this.
-    EXPECT_TRUE(checkBitmap("fontMetricsVisual", bigRT, 12, 40.0));
+    // Back to the default mean limit: the CPU engine now reproduces
+    // DirectWrite's grayscale pipeline (4x4 sampling, gamma/contrast table,
+    // baseline placement), which took this from 24.6 to ~11.
+    EXPECT_TRUE(checkBitmap("fontMetricsVisual", bigRT, 12));
 }
 
 // ============================================================
@@ -470,8 +472,10 @@ TEST_F(DrawingTest, MultilineParagraphAlignCenter)
     bigRT.drawTextU(kMultilineText, tf, { 4.f, 4.f, 252.f, 252.f }, brush, kTextOptions);
 
     bigRT.endDraw();
-    // 40: see FontMetricsVisual. Measured 32.2/255, balanced light and dark.
-    EXPECT_TRUE(checkBitmap("multilineParagraphCenter", bigRT, 2, 40.0));
+    // Default limit again: the 32.2 this once measured was the middle line's
+    // baseline rounding one pixel off Direct2D's; the CPU engine now applies
+    // the same half-pixel pre-snap the D2D backend does.
+    EXPECT_TRUE(checkBitmap("multilineParagraphCenter", bigRT, 2));
 }
 
 TEST_F(DrawingTest, MultilineParagraphAlignCenterBodyHeight)
@@ -491,8 +495,8 @@ TEST_F(DrawingTest, MultilineParagraphAlignCenterBodyHeight)
     bigRT.drawTextU(kMultilineText, tf, { 4.f, 4.f, 252.f, 252.f }, brush, kTextOptions);
 
     bigRT.endDraw();
-    // 40: see FontMetricsVisual. Measured 32.2/255, balanced light and dark.
-    EXPECT_TRUE(checkBitmap("multilineParagraphAlignCenterBodyHeight", bigRT, 2, 40.0));
+    // Default limit again: same story as MultilineParagraphAlignCenter.
+    EXPECT_TRUE(checkBitmap("multilineParagraphAlignCenterBodyHeight", bigRT, 2));
 }
 
 TEST_F(DrawingTest, MultilineParagraphAlignFar)
@@ -619,7 +623,9 @@ TEST_F(DrawingTest, MultilineTightParagraphCenter)
     bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 54.f}, brush, kTextOptions);
 
     bigRT.endDraw();
-    EXPECT_TRUE(checkBitmap("multilineTightParagraphCenter", bigRT, 2));
+    // 20: see DrawTextSimpleBodyHeight — mean over a now-tiny differing set
+    // (0.18% of pixels, was 3.2%).
+    EXPECT_TRUE(checkBitmap("multilineTightParagraphCenter", bigRT, 2, 20.0));
 }
 
 TEST_F(DrawingTest, MultilineTightParagraphFar)
@@ -639,7 +645,9 @@ TEST_F(DrawingTest, MultilineTightParagraphFar)
     bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 252.f, 54.f}, brush, kTextOptions);
 
     bigRT.endDraw();
-    EXPECT_TRUE(checkBitmap("multilineTightParagraphFar", bigRT, 2));
+    // 20: see DrawTextSimpleBodyHeight — mean over a now-tiny differing set
+    // (0.16% of pixels, was 2.7%).
+    EXPECT_TRUE(checkBitmap("multilineTightParagraphFar", bigRT, 2, 20.0));
 }
 
 // --- Narrow rect forcing word wrap ---
@@ -661,7 +669,9 @@ TEST_F(DrawingTest, MultilineNarrowWrap)
     bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 100.f, 252.f}, brush, kTextOptions);
 
     bigRT.endDraw();
-    EXPECT_TRUE(checkBitmap("multilineNarrowWrap", bigRT, 2));
+    // 20: see DrawTextSimpleBodyHeight — mean over a now-tiny differing set
+    // (0.34% of pixels, was 2.1%).
+    EXPECT_TRUE(checkBitmap("multilineNarrowWrap", bigRT, 2, 20.0));
 }
 
 TEST_F(DrawingTest, MultilineNarrowWrapLineHeight40)
@@ -681,7 +691,13 @@ TEST_F(DrawingTest, MultilineNarrowWrapLineHeight40)
     bigRT.drawTextU(kMultilineText, tf, {4.f, 4.f, 100.f, 252.f}, brush, kTextOptions);
 
     bigRT.endDraw();
-    EXPECT_TRUE(checkBitmap("multilineNarrowWrapLH40", bigRT, 2));
+    // 30: the starkest case of the DrawTextSimpleBodyHeight quirk — only 0.2%
+    // of pixels differ (was 2.0%), but half of them are two i-stems whose
+    // edge landed a full quarter-step off, ~61 code values each, and they
+    // dominate a mean taken over so few pixels. An exact-geometry solver puts
+    // the floor for quarter-pixel pen phases at 108 differing pixels here;
+    // finer phase grids were tried and mismatch three to four times MORE.
+    EXPECT_TRUE(checkBitmap("multilineNarrowWrapLH40", bigRT, 2, 30.0));
 }
 
 // ============================================================
