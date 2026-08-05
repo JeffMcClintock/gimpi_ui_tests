@@ -457,3 +457,78 @@ TEST(CpuBackend, SavePngHandlesPaddedRowStride)
         }
     }
 }
+
+// A stroked circle drawn far from the origin used to grow a horizontal spike
+// tangential to its top — plainly visible on SynthEdit's module pins, which are
+// small circles stacked down a module, so the first couple looked right and
+// every one below them did not.
+//
+// Two compounding causes, both fixed:
+//   1. Gfx_base.h's arc flattener derived its END point from the centre
+//      parameterization (atan2 -> cos/sin -> rotate -> translate) instead of
+//      using the end point the caller supplied. That lands about one ULP off,
+//      and one ULP is not small once the coordinate is a few hundred.
+//   2. CpuGfx.h's stroker then measured "is this point a duplicate of the start"
+//      with an ABSOLUTE 1e-6 epsilon, which cannot see a one-ULP gap at that
+//      magnitude. The surviving hair-length segment pointed in a direction made
+//      entirely of rounding noise, the miter join read it as a ~180-degree turn,
+//      and out came a spike as long as the miter limit permitted.
+//
+// The assertion is deliberately about the BOUNDS of what got painted rather than
+// exact pixels: any spike, of any length or direction, puts ink outside the
+// circle's own bounding box, and nothing else here can.
+TEST(CpuBackend, StrokedCircleFarFromOriginHasNoMiterSpike)
+{
+    CpuTestContext ctx;
+    constexpr uint32_t kW = 128, kH = 640;
+    auto rt = ctx.createRenderTarget(kW, kH);
+
+    // Radius and centres mirror SynthEdit's pin column (radius 3.1, pitch 12,
+    // zoomed 8x) — the case that surfaced this.
+    constexpr float kRadius = 3.1f * 8.0f;
+    constexpr float kX = 64.0f;
+    const float centresY[] = { 48.0f, 144.0f, 336.0f, 528.0f };
+
+    rt.beginDraw();
+    rt.clear(Colors::White);
+    auto brush = rt.createSolidColorBrush(Colors::Black);
+    for (const float cy : centresY)
+        rt.drawCircle({ kX, cy }, kRadius, brush, 8.0f);
+    rt.endDraw();
+
+    auto bmp = rt.getBitmap();
+    auto pixels = bmp.lockPixels(BitmapLockFlags::Read);
+    const uint8_t* base = pixels.getAddress();
+    const int32_t bpr = pixels.getBytesPerRow();
+
+    // Stroke straddles the radius, so ink may reach radius + halfWidth. Allow a
+    // couple of pixels of antialiasing slop on top of that.
+    const float reach = kRadius + 4.0f + 2.0f;
+
+    for (uint32_t y = 0; y < kH; ++y)
+    {
+        const uint16_t* row = reinterpret_cast<const uint16_t*>(base + size_t(y) * bpr);
+        for (uint32_t x = 0; x < kW; ++x)
+        {
+            // Background is opaque white; anything darker is ink.
+            if (detail::halfToFloat(row[size_t(x) * 4]) > 0.9f)
+                continue;
+
+            bool insideSomeCircle = false;
+            for (const float cy : centresY)
+            {
+                const float dx = float(x) - kX;
+                const float dy = float(y) - cy;
+                if (std::sqrt(dx * dx + dy * dy) <= reach)
+                {
+                    insideSomeCircle = true;
+                    break;
+                }
+            }
+            EXPECT_TRUE(insideSomeCircle)
+                << "ink at (" << x << ", " << y << ") lies outside every circle — a stroke spike";
+            if (!insideSomeCircle)
+                return; // one report is enough; don't flood on a full-width bar
+        }
+    }
+}
