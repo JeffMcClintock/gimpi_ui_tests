@@ -294,12 +294,12 @@ protected:
 
                 if (ourBpp == 4)
                 {
-                    // 32bppPBGRA: linear premultiplied BGRA 8-bit (e.g. from a
-                    // render target created with the SRGBPixels flag — despite
-                    // the flag name the byte values are LINEAR; SavePng.h:114
-                    // documents the same).  Decode through the same pipeline
-                    // as the high-precision formats: un-premultiply, then
-                    // linear -> sRGB to match the reference's encoding.
+                    // 32bppPBGRA: premultiplied BGRA 8-bit, ALREADY sRGB — for a
+                    // render target created with SRGBPixels as well as for a
+                    // loaded image, since the render-target face stopped storing
+                    // linear values (contract note above
+                    // cpugfx::Factory::loadImageU). So un-premultiply and stop;
+                    // the bytes are already in the reference's encoding.
                     constexpr float inv255 = 1.0f / 255.0f;
                     float fb = p[0] * inv255;
                     float fg = p[1] * inv255;
@@ -315,9 +315,12 @@ protected:
                     }
                     else { fr = fg = fb = 0.0f; }
 
-                    rendered[iR] = detail::linearToSRGB_f(fr);
-                    rendered[iG] = detail::linearToSRGB_f(fg);
-                    rendered[iB] = detail::linearToSRGB_f(fb);
+                    const auto toByte = [](float v) {
+                        return static_cast<uint8_t>(std::clamp(v * 255.0f + 0.5f, 0.0f, 255.0f));
+                    };
+                    rendered[iR] = toByte(fr);
+                    rendered[iG] = toByte(fg);
+                    rendered[iB] = toByte(fb);
                     rendered[iA] = a;
                 }
                 else if (ourIsSRGB)

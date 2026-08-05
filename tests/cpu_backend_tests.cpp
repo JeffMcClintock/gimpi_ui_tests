@@ -68,8 +68,15 @@ std::array<float, 4> readPixel(Bitmap& bmp, int x, int y)
     const int32_t bpp = px.getBytesPerPixel();
     const uint8_t* p = addr + size_t(y) * bpr + size_t(x) * bpp;
 
-    if (bpp == 4) // BGRA_sRGB_8i — linear bytes despite the name
-        return { p[2] / 255.0f, p[1] / 255.0f, p[0] / 255.0f, p[3] / 255.0f };
+    // BGRA_sRGB_8i. Every 4-byte bitmap reaching this helper is file-loaded
+    // (the render targets here are created unflagged, so they lock as fp16),
+    // and for those the bytes really are sRGB-encoded — the file's own curve,
+    // passed through the way DirectX does. Alpha is never gamma-encoded.
+    // A render target locked as BGRA_sRGB_8i would need the plain /255 instead;
+    // see the contract note above cpugfx::Factory::loadImageU.
+    if (bpp == 4)
+        return { SRGBPixelToLinear(p[2]), SRGBPixelToLinear(p[1]),
+                 SRGBPixelToLinear(p[0]), p[3] / 255.0f };
 
     const uint16_t* h = reinterpret_cast<const uint16_t*>(p);
     return { detail::halfToFloat(h[0]), detail::halfToFloat(h[1]),

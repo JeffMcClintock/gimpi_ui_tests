@@ -1778,4 +1778,407 @@ TEST(CpuVsD2D, NonFinitePointsAreSkippedSafely)
     EXPECT_NEAR(at(60, 60)[2], 1.0f, 2e-3f);
 }
 
+// --- What BGRA_sRGB_8i actually holds --------------------------------------
+//
+// Both backends report BGRA_sRGB_8i for two quite different bitmaps, and the
+// name only tells the truth about one of them:
+//
+//   loaded image   — the transfer function of the FILE. PNG is sRGB, so the
+//                    locked bytes are sRGB-encoded, exactly as the format name
+//                    and the api::IBitmapPixels bit-11 documentation say.
+//   render target  — LINEAR bytes. gmpi::drawing::Color is linear, D2D writes
+//                    those values straight into a B8G8R8A8_UNORM WIC surface,
+//                    and helpers/SavePng.h un-gammas on that assumption.
+//
+// So the same enum value means two things depending on where the bitmap came
+// from, and the pair of tests below pins BOTH — because the previous CPU
+// backend collapsed them into one answer (linear, always) and silently
+// diverged from Direct2D on every file it loaded.
+//
+// The gradient asset is the right probe: opaque, so premultiplication is a
+// no-op and nothing but the transfer function can move a byte.
+
+namespace
+{
+// One BGRA pixel of a 32bpp lock, returned as {B,G,R,A}.
+std::array<int, 4> readBgra8(BitmapPixels& px, int x, int y)
+{
+    const uint8_t* p = px.getAddress() + size_t(y) * px.getBytesPerRow() + size_t(x) * 4;
+    return { p[0], p[1], p[2], p[3] };
+}
+
+// The two candidate encodings of a source sRGB byte, in 8-bit.
+int asSRGBByte(int srgb) { return srgb; }
+int asLinearByte(int srgb)
+{
+    return int(std::clamp(SRGBPixelToLinear(uint8_t(srgb)) * 255.0f + 0.5f, 0.0f, 255.0f));
+}
+} // namespace
+
+TEST(CpuVsD2D, LoadedImageLocksAsSRGB)
+{
+    DrawingTestContext d2d; // CoInitializes; WIC needs it for both halves
+
+    // 128x20, column x = opaque sRGB grey x. Written only if absent.
+    const auto path = std::filesystem::path(REFERENCE_IMAGES_DIR) / "colourRoundTrip.png";
+    ASSERT_TRUE(DrawingTestContext::createSRGBGradientPng(path))
+        << "could not create the gradient asset at " << path.string();
+
+    auto d2dBmp = d2d.factory().loadImageU(path.string());
+    ASSERT_TRUE(d2dBmp) << "Direct2D could not load " << path.string();
+
+    gmpi::cpugfx::Factory cpuImpl;
+    cpuImpl.imageDecoder = gmpi::drawing::decodeImageFile;
+    Factory cpuFactory;
+    *AccessPtr::put(cpuFactory) = &cpuImpl;
+    auto cpuBmp = cpuFactory.loadImageU(path.string());
+    ASSERT_TRUE(cpuBmp) << "the CPU backend could not load " << path.string();
+
+    ASSERT_EQ(d2dBmp.getSize().width, 128u);
+    ASSERT_EQ(cpuBmp.getSize().width, 128u);
+
+    auto pxD = d2dBmp.lockPixels(BitmapLockFlags::Read);
+    auto pxC = cpuBmp.lockPixels(BitmapLockFlags::Read);
+
+    // Premise: if the two disagree about the format there is no byte contract
+    // to compare in the first place.
+    ASSERT_EQ(pxD.getPixelFormat(), int32_t(api::IBitmapPixels::BGRA_sRGB_8i));
+    ASSERT_EQ(pxC.getPixelFormat(), int32_t(api::IBitmapPixels::BGRA_sRGB_8i));
+    ASSERT_EQ(pxD.channelLayout(), 0) << "expected BGRA byte order";
+    ASSERT_EQ(pxC.channelLayout(), 0) << "expected BGRA byte order";
+
+    int maxCpuVsD2d = 0, maxCpuVsSRGB = 0, maxD2dVsSRGB = 0;
+    for (int x = 0; x < 128; ++x)
+    {
+        const auto d = readBgra8(pxD, x, 10);
+        const auto c = readBgra8(pxC, x, 10);
+
+        maxCpuVsD2d  = (std::max)(maxCpuVsD2d,  std::abs(c[2] - d[2]));
+        maxCpuVsSRGB = (std::max)(maxCpuVsSRGB, std::abs(c[2] - asSRGBByte(x)));
+        maxD2dVsSRGB = (std::max)(maxD2dVsSRGB, std::abs(d[2] - asSRGBByte(x)));
+
+        if (x % 16 == 0 || x == 127)
+        {
+            std::cout << "  [LOADED] src sRGB " << x
+                      << ": d2d " << d[2] << " cpu " << c[2]
+                      << "  (sRGB would be " << asSRGBByte(x)
+                      << ", linear would be " << asLinearByte(x) << ")\n";
+        }
+
+        ASSERT_EQ(d[3], 255) << "opaque source at column " << x;
+        ASSERT_EQ(c[3], 255) << "opaque source at column " << x;
+    }
+
+    std::cout << "  [LOADED] max |cpu-d2d| " << maxCpuVsD2d
+              << ", max |cpu-srgb| " << maxCpuVsSRGB
+              << ", max |d2d-srgb| " << maxD2dVsSRGB << "\n";
+
+    // Direct2D is the reference: WIC decodes the PNG to 32bppPBGRA without
+    // touching gamma, so the file's sRGB bytes arrive verbatim.
+    EXPECT_LE(maxD2dVsSRGB, 1) << "Direct2D no longer hands back the file's sRGB bytes";
+
+    // And the software backend must say the same thing. It used to hand back
+    // LINEAR bytes here — a ~73-code-value error at mid grey — so every caller
+    // doing byte-level work on a loaded image (SynthEditLib's ImageCache and
+    // ImageTinted2Gui, and gmpi_ui's own helpers/ImageCache.cpp, which all
+    // branch on isSRGB()) tinted differently under the software renderer.
+    EXPECT_LE(maxCpuVsSRGB, 1) << "the CPU backend is not handing back sRGB bytes";
+    EXPECT_LE(maxCpuVsD2d, 1)
+        << "CPU and Direct2D disagree about the contents of a loaded image";
+}
+
+TEST(CpuVsD2D, SRGBRenderTargetLocksAsSRGB)
+{
+    // The other half of the contract, and it is now the SAME half: a render
+    // target created with SRGBPixels reports BGRA_sRGB_8i and holds sRGB bytes,
+    // exactly like a loaded image. It used to be the one exception — linear
+    // bytes under an sRGB name — which is what darkened cached bitmaps and
+    // banded dark gradients. Only a Mask stays linear now.
+    constexpr int32_t kSRGBPixels = int32_t(BitmapRenderTargetFlags::SRGBPixels);
+
+    // Linear 0.5 encodes as 128 linear, 188 sRGB — far apart enough that no
+    // rounding argument can confuse the two.
+    const Color grey{ 0.5f, 0.5f, 0.5f, 1.0f };
+
+    DrawingTestContext d2d;
+    auto rtD = d2d.createCpuRenderTarget({ 8, 8 }, kSRGBPixels);
+    rtD.beginDraw();
+    rtD.clear(grey);
+    rtD.endDraw();
+
+    gmpi::cpugfx::Factory cpuImpl;
+    Factory cpuFactory;
+    *AccessPtr::put(cpuFactory) = &cpuImpl;
+    auto rtC = cpuFactory.createCpuRenderTarget({ 8, 8 }, kSRGBPixels);
+    rtC.beginDraw();
+    rtC.clear(grey);
+    rtC.endDraw();
+
+    auto bmpD = rtD.getBitmap();
+    auto bmpC = rtC.getBitmap();
+    auto pxD = bmpD.lockPixels(BitmapLockFlags::Read);
+    auto pxC = bmpC.lockPixels(BitmapLockFlags::Read);
+
+    ASSERT_EQ(pxD.getPixelFormat(), int32_t(api::IBitmapPixels::BGRA_sRGB_8i));
+    ASSERT_EQ(pxC.getPixelFormat(), int32_t(api::IBitmapPixels::BGRA_sRGB_8i));
+
+    const auto d = readBgra8(pxD, 4, 4);
+    const auto c = readBgra8(pxC, 4, 4);
+    std::cout << "  [RT] linear 0.5 -> d2d " << d[2] << " cpu " << c[2]
+              << "  (sRGB is 188, linear would be 128)\n";
+
+    EXPECT_NEAR(d[2], 188, 2) << "Direct2D render target has gone back to linear bytes";
+    EXPECT_NEAR(c[2], 188, 2) << "CPU render target has gone back to linear bytes";
+    EXPECT_NEAR(c[2], d[2], 2) << "CPU and Direct2D disagree about render-target bytes";
+}
+
+// The other end of the same contract: what the RENDERER sees when it samples a
+// loaded image. Locking and sampling have to agree about the encoding, and the
+// CPU sampler applies its sRGB curve on the strength of the lock format alone —
+// so getting the lock format right without touching the sampler would swap one
+// divergence for another. Direct2D binds a loaded 32bppPBGRA bitmap as
+// B8G8R8A8_UNORM_SRGB and therefore de-gammas on sample; the CPU surface already
+// holds linear, so it must NOT de-gamma again.
+TEST(CpuVsD2D, DrawingALoadedImageAgrees)
+{
+    DrawingTestContext ctx; // COM, for the asset writer below
+    const auto path = std::filesystem::path(REFERENCE_IMAGES_DIR) / "colourRoundTrip.png";
+    ASSERT_TRUE(DrawingTestContext::createSRGBGradientPng(path));
+
+    runScene("x_loaded_gradient", [&](BitmapRenderTarget& rt) {
+        rt.clear(Colors::White);
+        auto bmp = rt.getFactory().loadImageU(path.string());
+        ASSERT_TRUE(bmp) << "loadImageU failed for " << path.string();
+        rt.drawBitmap(bmp, { 0.f, 0.f, 128.f, 20.f }, { 0.f, 0.f, 128.f, 20.f },
+                      1.0f, BitmapInterpolationMode::NearestNeighbor);
+    }, 128, 20, 2, 2.0, 1.0); // 1:1 nearest-neighbour: no AA, so near-exact
+}
+
+// The missing direction: load -> savePng -> reload. (PngAlphaRoundTrip goes the
+// other way, render target -> save -> load, where the save side reads an
+// unambiguous fp16 surface.)
+//
+// This used to gamma-encode twice — sRGB 64 came back 137 — because savePng
+// assumed a 4-byte lock held linear bytes. That assumption was true of render
+// targets and false of loaded images, and savePng could not tell them apart
+// since both report BGRA_sRGB_8i. Now neither holds linear, so savePng just
+// un-premultiplies and the round trip is lossless.
+TEST(CpuVsD2D, SavePngOfALoadedImageRoundTripsLosslessly)
+{
+    DrawingTestContext d2d; // COM for WIC (asset writer, D2D load, savePng)
+    const auto srcPath = std::filesystem::path(REFERENCE_IMAGES_DIR) / "colourRoundTrip.png";
+    ASSERT_TRUE(DrawingTestContext::createSRGBGradientPng(srcPath));
+
+    gmpi::cpugfx::Factory cpuImpl;
+    cpuImpl.imageDecoder = gmpi::drawing::decodeImageFile;
+    Factory cpuFactory;
+    *AccessPtr::put(cpuFactory) = &cpuImpl;
+
+    const auto outDir = std::filesystem::path(REFERENCE_IMAGES_DIR) / "cpu_backend_preview";
+
+    // load -> savePng -> reload, returning the red channel of row 10.
+    auto roundTrip = [&](Factory& factory, const char* saveName) -> std::array<int, 128>
+    {
+        auto loaded = factory.loadImageU(srcPath.string());
+        EXPECT_TRUE(loaded);
+        const auto savedPath = outDir / saveName;
+        std::filesystem::remove(savedPath); // stale file would mask the re-save
+        EXPECT_TRUE(savePng(savedPath, loaded));
+
+        auto reloaded = factory.loadImageU(savedPath.string());
+        EXPECT_TRUE(reloaded);
+        EXPECT_EQ(reloaded.getSize().width, 128u);
+
+        std::array<int, 128> row{};
+        auto px = reloaded.lockPixels(BitmapLockFlags::Read);
+        EXPECT_EQ(px.getPixelFormat(), int32_t(api::IBitmapPixels::BGRA_sRGB_8i));
+        for (int x = 0; x < 128; ++x)
+            row[x] = readBgra8(px, x, 10)[2];
+        return row;
+    };
+
+    const auto viaD2d = roundTrip(d2d.factory(), "x_resaved_gradient_d2d.png");
+    const auto viaCpu = roundTrip(cpuFactory,    "x_resaved_gradient_cpu.png");
+
+    int maxBackendDiff = 0, maxLosslessErr = 0;
+    for (int x = 0; x < 128; ++x)
+    {
+        maxBackendDiff = (std::max)(maxBackendDiff, std::abs(viaCpu[x] - viaD2d[x]));
+        maxLosslessErr = (std::max)(maxLosslessErr, std::abs(viaCpu[x] - x));
+
+        if (x % 32 == 0 || x == 127)
+            std::cout << "  [RESAVE] src " << x << ": d2d " << viaD2d[x]
+                      << " cpu " << viaCpu[x] << "\n";
+    }
+    std::cout << "  [RESAVE] max |cpu-d2d| " << maxBackendDiff
+              << ", max |cpu-src| " << maxLosslessErr << "\n";
+
+    EXPECT_LE(maxBackendDiff, 1)
+        << "CPU and Direct2D disagree on re-saving a loaded image";
+
+    // The whole point: a PNG that goes out and comes back is the same PNG.
+    EXPECT_LE(maxLosslessErr, 1)
+        << "load -> savePng -> reload is lossy; if this is the old double gamma "
+           "(sRGB 64 coming back ~137), savePng has gone back to treating a "
+           "4-byte lock as linear";
+}
+
+// Drawing into an 8-bit render target and drawing it back must change nothing
+// but precision. This is the face whose bytes the RASTERIZER writes, and it was
+// the last one storing linear values: D2D used to render into a plain
+// B8G8R8A8_UNORM WIC surface and then bind that same surface as
+// B8G8R8A8_UNORM_SRGB when drawing it, de-gammaing values that were never
+// encoded. Two symptoms from the one cause, and the range decided which you saw:
+//
+//   full-range ramp — wrong curve (mid grey came back sRGB 128, not 188)
+//   dark ramp       — banding: 8 bits spent LINEARLY kept 14 levels out of 64
+//
+// Both are asserted below, along with the requirement that outlives them: the
+// software backend does whatever Direct2D does. Creating the target _UNORM_SRGB
+// is what fixed it, so a regression here most likely means that pixel format
+// went back to DXGI_FORMAT_UNKNOWN.
+TEST(CpuVsD2D, SRGBRenderTargetRoundTripIsFaithful)
+{
+    DrawingTestContext d2d;
+    gmpi::cpugfx::Factory cpuImpl;
+    Factory cpuFactory;
+    *AccessPtr::put(cpuFactory) = &cpuImpl;
+
+    constexpr uint32_t kW = 256, kH = 4;
+
+    // Solid 1px columns, not a gradient brush: no interpolation and no stop
+    // collection colour space to confound the reading. Column x is linear
+    // intensity top*x/(kW-1), drawn either straight into an fp16 target or via
+    // an SRGBPixels one. Returns row 2 as sRGB bytes.
+    auto renderRamp = [&](Factory factory, bool viaRenderTarget, float top)
+    {
+        auto paint = [&](BitmapRenderTarget& target)
+        {
+            for (uint32_t x = 0; x < kW; ++x)
+            {
+                const float v = top * float(x) / float(kW - 1);
+                auto brush = target.createSolidColorBrush(Color{ v, v, v, 1.0f });
+                target.fillRectangle({ float(x), 0.0f, float(x) + 1.0f, float(kH) }, brush);
+            }
+        };
+
+        auto outer = factory.createCpuRenderTarget({ kW, kH }, 0); // fp16: adds no 8-bit face of its own
+        outer.beginDraw();
+        outer.clear(Colors::Black);
+        if (viaRenderTarget)
+        {
+            // createCpuRenderTarget force-ORs CpuReadable, so on DirectX this
+            // really is the 8-bit WIC path and not the GPU branch.
+            auto inner = factory.createCpuRenderTarget({ kW, kH },
+                             int32_t(BitmapRenderTargetFlags::SRGBPixels));
+            inner.beginDraw();
+            paint(inner);
+            inner.endDraw();
+            auto bmp = inner.getBitmap();
+            outer.drawBitmap(bmp, { 0.0f, 0.0f, float(kW), float(kH) },
+                                  { 0.0f, 0.0f, float(kW), float(kH) },
+                             1.0f, BitmapInterpolationMode::NearestNeighbor);
+        }
+        else
+        {
+            paint(outer);
+        }
+        outer.endDraw();
+
+        auto bmp = outer.getBitmap();
+        auto px = bmp.lockPixels(BitmapLockFlags::Read);
+        std::array<int, kW> row{};
+        for (uint32_t x = 0; x < kW; ++x)
+            row[x] = decodeToSRGB(px.getAddress(), px.getBytesPerRow(), int(x), 2)[0];
+        return row;
+    };
+
+    // Full range: isolates the transfer curve (nothing quantizes away).
+    const auto directD2d = renderRamp(d2d.factory(), false, 1.0f);
+    const auto viaRtD2d  = renderRamp(d2d.factory(), true,  1.0f);
+    const auto directCpu = renderRamp(cpuFactory,    false, 1.0f);
+    const auto viaRtCpu  = renderRamp(cpuFactory,    true,  1.0f);
+
+    int maxDirect = 0, maxViaRt = 0;
+    for (uint32_t x = 0; x < kW; ++x)
+    {
+        maxDirect = (std::max)(maxDirect, std::abs(directCpu[x] - directD2d[x]));
+        maxViaRt  = (std::max)(maxViaRt,  std::abs(viaRtCpu[x]  - viaRtD2d[x]));
+    }
+
+    std::cout << "  [RT-TRIP] mid grey: direct d2d " << directD2d[128] << " cpu " << directCpu[128]
+              << " | via RT d2d " << viaRtD2d[128] << " cpu " << viaRtCpu[128] << "\n";
+    std::cout << "  [RT-TRIP] max |cpu-d2d|: direct " << maxDirect << ", via RT " << maxViaRt << "\n";
+
+    // THE REQUIREMENT: whatever Direct2D does here, the software backend does too.
+    EXPECT_LE(maxDirect, 2) << "backends disagree on a plain ramp";
+    EXPECT_LE(maxViaRt, 2)
+        << "backends disagree on an SRGBPixels render-target round trip";
+
+    // Dark ramp: where 8-bit LINEAR storage runs out of levels.
+    const auto darkDirect = renderRamp(d2d.factory(), false, 0.05f);
+    const auto darkViaRt  = renderRamp(d2d.factory(), true,  0.05f);
+    auto levels = [](const std::array<int, kW>& row) {
+        bool seen[256]{}; int n = 0;
+        for (int v : row) if (v >= 0 && v < 256 && !seen[v]) { seen[v] = true; ++n; }
+        return n;
+    };
+    const int lvlDirect = levels(darkDirect), lvlViaRt = levels(darkViaRt);
+    std::cout << "  [RT-TRIP] dark ramp distinct levels: direct " << lvlDirect
+              << ", via RT " << lvlViaRt << "\n";
+
+    // The round trip is faithful: an 8-bit sRGB face costs rounding, nothing more.
+    EXPECT_NEAR(directD2d[128], 188, 3) << "a direct mid grey is no longer sRGB 188";
+    EXPECT_NEAR(viaRtD2d[128], directD2d[128], 2)
+        << "the render-target round trip is darkening again — the 8-bit face has "
+           "gone back to storing linear values";
+    EXPECT_GE(lvlViaRt, lvlDirect - 2)
+        << "the round trip is banding a dark ramp again — 8 bits are being spent "
+           "linearly instead of perceptually";
+}
+
+// What colour space a gradient brush INTERPOLATES in — which decides what a
+// plain black->white GradientBrush is supposed to look like in the first place.
+// gmpi Colors are linear, so a linear interpolation puts mid grey at linear 0.5
+// = sRGB 188 (a bright, washed-looking ramp). Interpolating in sRGB instead puts
+// it at sRGB 128 — visually identical to a perceptually-uniform sRGB ramp.
+//
+// Worth pinning separately from any render-target round trip: if a gradient
+// already lands on 128 when drawn DIRECTLY, then a round trip that also lands on
+// 128 is faithful, and reading the pair as "the round trip darkened it" would
+// send you chasing the wrong bug.
+TEST(CpuVsD2D, GradientBrushInterpolationSpace)
+{
+    DrawingTestContext d2d;
+    gmpi::cpugfx::Factory cpuImpl;
+    Factory cpuFactory;
+    *AccessPtr::put(cpuFactory) = &cpuImpl;
+
+    constexpr uint32_t kW = 256, kH = 4;
+
+    auto midpoint = [&](Factory factory)
+    {
+        auto rt = factory.createCpuRenderTarget({ kW, kH }, 0); // fp16: no 8-bit face in the way
+        rt.beginDraw();
+        rt.clear(Colors::Black);
+        auto stops = makeStops(rt, { { 0.0f, Colors::Black }, { 1.0f, Colors::White } });
+        auto brush = makeLinear(rt, { 0.0f, 0.0f }, { float(kW), 0.0f }, stops);
+        rt.fillRectangle({ 0.0f, 0.0f, float(kW), float(kH) }, brush);
+        rt.endDraw();
+
+        auto bmp = rt.getBitmap();
+        auto px = bmp.lockPixels(BitmapLockFlags::Read);
+        return int(decodeToSRGB(px.getAddress(), px.getBytesPerRow(), int(kW / 2), 2)[0]);
+    };
+
+    const int d2dMid = midpoint(d2d.factory());
+    const int cpuMid = midpoint(cpuFactory);
+    std::cout << "  [GRAD] black->white midpoint: d2d " << d2dMid << " cpu " << cpuMid
+              << "  (linear interpolation = 188, sRGB interpolation = 128)\n";
+
+    // The requirement, whichever it turns out to be.
+    EXPECT_NEAR(cpuMid, d2dMid, 2)
+        << "backends interpolate gradients in different colour spaces";
+}
+
 #endif // _WIN32
