@@ -12,3 +12,4 @@ reference_images/cpu_backend_preview/
 .DS_Store
 /.claude
 *.log
+Testing/
