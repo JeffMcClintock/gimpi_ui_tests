@@ -57,15 +57,28 @@ struct CpuTestContext
     }
 };
 
+// Premultiplied linear RGBA, whichever of the two formats the bitmap locks as:
+// render targets are fp16 RGBA, file-loaded images are 8-bit BGRA (matching what
+// the DirectX backend gets from WIC).
 std::array<float, 4> readPixel(Bitmap& bmp, int x, int y)
 {
     auto px = bmp.lockPixels(BitmapLockFlags::Read);
     const uint8_t* addr = px.getAddress();
     const int32_t bpr = px.getBytesPerRow();
-    const uint16_t* h = reinterpret_cast<const uint16_t*>(addr + size_t(y) * bpr + size_t(x) * 8);
+    const int32_t bpp = px.getBytesPerPixel();
+    const uint8_t* p = addr + size_t(y) * bpr + size_t(x) * bpp;
+
+    if (bpp == 4) // BGRA_sRGB_8i — linear bytes despite the name
+        return { p[2] / 255.0f, p[1] / 255.0f, p[0] / 255.0f, p[3] / 255.0f };
+
+    const uint16_t* h = reinterpret_cast<const uint16_t*>(p);
     return { detail::halfToFloat(h[0]), detail::halfToFloat(h[1]),
              detail::halfToFloat(h[2]), detail::halfToFloat(h[3]) };
 }
+
+// One 8-bit step is 1/255, so anything read back through a byte format needs a
+// looser bound than the fp16 default.
+constexpr float k8BitTolerance = 6e-3f;
 
 void expectPixel(Bitmap& bmp, int x, int y, std::array<float, 4> want, float tol = 2e-3f)
 {
@@ -322,12 +335,10 @@ TEST(CpuBackend, PngAlphaRoundTrip)
     ASSERT_NE(AccessPtr::get(loaded), nullptr) << "loadImageU failed";
     ASSERT_EQ(loaded.getSize().width, 4u);
 
-    auto px = loaded.lockPixels(BitmapLockFlags::Read);
-    const uint16_t* row = reinterpret_cast<const uint16_t*>(px.getAddress());
-    const auto at = [&](int x, int c) { return detail::halfToFloat(row[x * 4 + c]); };
+    const auto at = [&](int x, int c) { return readPixel(loaded, x, 0)[c]; };
 
     // Opaque primaries survive intact.
-    expectPixel(loaded, 0, 0, kRed);
+    expectPixel(loaded, 0, 0, kRed, k8BitTolerance);
     EXPECT_NEAR(at(1, 1), 1.0f, 0.01f);
     EXPECT_NEAR(at(2, 2), 1.0f, 0.01f);
 
