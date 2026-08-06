@@ -127,6 +127,72 @@ TEST(CpuBackend, ClearAndFillRectangle)
     savePreview("fill_rect.png", bmp);
 }
 
+// dpi is a real argument, not decoration: at 192 a DIP is two pixels, so the
+// same coordinates cover twice the surface. The CPU backend used to discard it
+// (the parameter was literally spelled `float /*dpi*/`) while Direct2D honoured
+// it, which meant any caller rendering above 96 - a breadcrumb thumbnail, a
+// HiDPI export - drew at 1 DIP = 1 pixel into a surface sized for more and
+// filled only a corner of it. Nothing failed; the picture was just small and in
+// the wrong place.
+TEST(CpuBackend, CpuRenderTargetHonoursDpi)
+{
+    CpuTestContext ctx;
+
+    // 64x64 pixels at 192 dpi = a 32x32 DIP drawing surface.
+    auto rt = ctx.factory.createCpuRenderTarget({ 64, 64 }, 0, 192.0f);
+    ASSERT_NE(AccessPtr::get(rt), nullptr);
+
+    rt.beginDraw();
+    rt.clear(Colors::White);
+    auto red = rt.createSolidColorBrush(Colors::Red);
+    rt.fillRectangle({ 0.0f, 0.0f, 16.0f, 16.0f }, red); // 16 DIPs -> 32 pixels
+    rt.endDraw();
+
+    auto bmp = rt.getBitmap();
+    expectPixel(bmp, 30, 30, kRed);     // inside the scaled rect
+    expectPixel(bmp, 31, 31, kRed);     // last covered pixel
+    expectPixel(bmp, 32, 32, kWhite);   // first pixel beyond it
+    expectPixel(bmp, 40, 40, kWhite);   // well clear
+
+    // The surface itself is unchanged - dpi scales the drawing, not the buffer.
+    const auto size = bmp.getSize();
+    EXPECT_EQ(size.width,  64u);
+    EXPECT_EQ(size.height, 64u);
+}
+
+// getTransform must hand back what the client set, NOT the DPI-scaled matrix it
+// draws with. Read-modify-write of the transform is the normal idiom, and
+// returning the effective one would compound the DPI scale every round trip.
+TEST(CpuBackend, DpiIsNotVisibleThroughGetTransform)
+{
+    CpuTestContext ctx;
+    auto rt = ctx.factory.createCpuRenderTarget({ 64, 64 }, 0, 192.0f);
+    ASSERT_NE(AccessPtr::get(rt), nullptr);
+
+    // Fresh target: the client has set nothing, so it reads back as identity.
+    EXPECT_EQ(rt.getTransform(), Matrix3x2{}) << "DPI scale leaked into the client transform";
+
+    const auto translate = makeTranslation(5.0f, 7.0f);
+    rt.setTransform(translate);
+    const auto readBack = rt.getTransform();
+    EXPECT_EQ(readBack, translate) << "setTransform/getTransform is not a round trip";
+
+    // And a round trip must not drift the drawing either: writing back what we
+    // just read leaves the 16-DIP rect still covering 32 pixels.
+    rt.setTransform(readBack);
+    rt.beginDraw();
+    rt.clear(Colors::White);
+    auto red = rt.createSolidColorBrush(Colors::Red);
+    rt.fillRectangle({ 0.0f, 0.0f, 8.0f, 8.0f }, red); // +translate(5,7) DIPs
+    rt.endDraw();
+
+    auto bmp = rt.getBitmap();
+    // (5,7)..(13,15) DIPs -> (10,14)..(26,30) pixels
+    expectPixel(bmp, 20, 20, kRed);
+    expectPixel(bmp,  8, 20, kWhite);  // left of the translated rect
+    expectPixel(bmp, 28, 20, kWhite);  // right of it
+}
+
 TEST(CpuBackend, AlphaBlendsInLinearSpace)
 {
     CpuTestContext ctx;
