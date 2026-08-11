@@ -72,6 +72,27 @@ if(MSVC)
 endif()
 
 # ---------------------------------------------------------------------------
+# tinyxml2 — the XML reader helpers/SvgParser.h is written against.
+# ---------------------------------------------------------------------------
+FetchContent_Declare(
+    tinyxml2
+    GIT_REPOSITORY https://github.com/leethomason/tinyxml2
+    GIT_TAG        10.0.0
+    GIT_SHALLOW    ON
+    SOURCE_SUBDIR  do-not-configure   # single source file, we compile it ourselves
+)
+FetchContent_MakeAvailable(tinyxml2)
+
+add_library(gmpi_tinyxml2 STATIC ${tinyxml2_SOURCE_DIR}/tinyxml2.cpp)
+
+# SvgParser.h includes "tinyXml2/tinyxml2.h" — the layout SynthEditLib vendors it
+# under. Stage the fetched header into that layout so both consumers agree
+# (the folder name's capital X matters on case-sensitive filesystems).
+set(TINYXML2_STAGE_DIR ${CMAKE_CURRENT_BINARY_DIR}/tinyxml2_stage)
+file(COPY ${tinyxml2_SOURCE_DIR}/tinyxml2.h DESTINATION ${TINYXML2_STAGE_DIR}/tinyXml2)
+target_include_directories(gmpi_tinyxml2 PUBLIC ${tinyxml2_SOURCE_DIR} ${TINYXML2_STAGE_DIR})
+
+# ---------------------------------------------------------------------------
 # GoogleTest
 # ---------------------------------------------------------------------------
 FetchContent_Declare(
@@ -123,6 +144,7 @@ add_executable(gmpi_ui_tests
     tests/cpu_text_tests.cpp
     tests/drawing_math_tests.cpp
     tests/cpu_present_tests.cpp
+    tests/svg_tests.cpp
     ${DRAWING_TEST_CONTEXT_SRC}
     ${GMPI_UI_SDK}/backends/DirectXGfx.cpp
     ${GMPI_UI_SDK}/experimental/grid.cpp
@@ -152,9 +174,11 @@ target_sources(gmpi_ui_tests PRIVATE
 # Use forward slashes so it works as a C string literal on Windows too.
 file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/reference_images" REF_IMAGES_PATH)
 file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/fonts" FONTS_PATH)
+file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tests/assets" TEST_ASSETS_PATH)
 target_compile_definitions(gmpi_ui_tests PRIVATE
     REFERENCE_IMAGES_DIR="${REF_IMAGES_PATH}"
     FONTS_DIR="${FONTS_PATH}"
+    TEST_ASSETS_DIR="${TEST_ASSETS_PATH}"
     GMPI_UI_TESTS_NATIVE_BACKEND=$<BOOL:${GMPI_UI_TESTS_NATIVE_BACKEND}>
     UNICODE
     _UNICODE
@@ -172,6 +196,7 @@ endif()
 if(APPLE)
     target_link_libraries(gmpi_ui_tests PRIVATE
         gtest_main
+        gmpi_tinyxml2
         gmpi_harfbuzz   # tests/cpu_text_tests.cpp shapes with it directly
         "-framework Cocoa"
         "-framework CoreGraphics"
@@ -181,6 +206,7 @@ if(APPLE)
 elseif(WIN32)
     target_link_libraries(gmpi_ui_tests PRIVATE
         gtest_main
+        gmpi_tinyxml2
         gmpi_harfbuzz
         d2d1
         dwrite
@@ -191,6 +217,7 @@ elseif(WIN32)
 else()
     target_link_libraries(gmpi_ui_tests PRIVATE
         gtest_main
+        gmpi_tinyxml2
         gmpi_harfbuzz
         PkgConfig::FONTCONFIG
         PkgConfig::LIBPNG
