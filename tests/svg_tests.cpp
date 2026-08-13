@@ -289,3 +289,157 @@ TEST_F(DrawingTest, SvgOpacity)
 
     EXPECT_TRUE(checkResult("svgOpacity", 0, 20.0));
 }
+
+// ============================================================
+// SvgParser::Svg — the retained, geometry-caching form
+// ============================================================
+
+namespace {
+
+// Every byte of two render targets, compared directly. Stronger than a
+// reference image for this: the question is not "does it look right" but
+// "is the cached path the SAME as the streamed one", and only an exact
+// comparison answers that.
+::testing::AssertionResult pixelsIdentical(BitmapRenderTarget& a, BitmapRenderTarget& b)
+{
+    auto bitmapA = a.getBitmap();
+    auto bitmapB = b.getBitmap();
+
+    const auto sizeA = bitmapA.getSize();
+    const auto sizeB = bitmapB.getSize();
+
+    if (sizeA.width != sizeB.width || sizeA.height != sizeB.height)
+        return ::testing::AssertionFailure() << "size mismatch";
+
+    auto pixelsA = bitmapA.lockPixels(BitmapLockFlags::Read);
+    auto pixelsB = bitmapB.lockPixels(BitmapLockFlags::Read);
+
+    const int32_t bytesPerRow = pixelsA.getBytesPerRow();
+    const int32_t bytesPerPixel = pixelsA.getBytesPerPixel();
+
+    for (uint32_t y = 0; y < sizeA.height; ++y)
+    {
+        const uint8_t* rowA = pixelsA.getAddress() + y * bytesPerRow;
+        const uint8_t* rowB = pixelsB.getAddress() + y * pixelsB.getBytesPerRow();
+
+        if (std::memcmp(rowA, rowB, (size_t)sizeA.width * bytesPerPixel) != 0)
+            return ::testing::AssertionFailure() << "pixels differ on row " << y;
+    }
+
+    return ::testing::AssertionSuccess();
+}
+
+} // namespace
+
+// THE test for the cache: a retained Svg must draw exactly what the streaming
+// parser draws. Fade.svg is the right document to prove it on because it
+// exercises gradients, a display:none layer, arcs, dashes and hundreds of
+// glyph outlines — if the compile pass diverges from drawElement's traversal
+// on any of those, this catches it.
+TEST_F(DrawingTest, SvgCachedMatchesStreamed)
+{
+    const auto path = assetPath("Fade.svg").string();
+
+    auto streamed = drawingContext.factory().createCpuRenderTarget({45, 380}, kRenderFlags);
+    streamed.beginDraw();
+    streamed.clear(Colors::White);
+    const auto streamedSize = SvgParser::draw(streamed, path);
+    streamed.endDraw();
+
+    SvgParser::Svg svg;
+    ASSERT_TRUE(svg.loadFromFile(path));
+
+    auto cached = drawingContext.factory().createCpuRenderTarget({45, 380}, kRenderFlags);
+    cached.beginDraw();
+    cached.clear(Colors::White);
+    const auto cachedSize = svg.draw(cached);
+    cached.endDraw();
+
+    EXPECT_EQ(cachedSize.width,  streamedSize.width);
+    EXPECT_EQ(cachedSize.height, streamedSize.height);
+    EXPECT_EQ(svg.size().width,  streamedSize.width);
+
+    EXPECT_TRUE(pixelsIdentical(streamed, cached));
+}
+
+// Drawing twice must not accumulate state. The cache is mutable and the draw
+// loop leaves a transform behind it, so a second pass is where a missing
+// restore would show up.
+TEST_F(DrawingTest, SvgCachedIsStableAcrossDraws)
+{
+    SvgParser::Svg svg;
+    ASSERT_TRUE(svg.loadFromFile(assetPath("Fade.svg").string()));
+
+    auto first = drawingContext.factory().createCpuRenderTarget({45, 380}, kRenderFlags);
+    first.beginDraw();
+    first.clear(Colors::White);
+    svg.draw(first);
+    first.endDraw();
+
+    auto second = drawingContext.factory().createCpuRenderTarget({45, 380}, kRenderFlags);
+    second.beginDraw();
+    second.clear(Colors::White);
+    svg.draw(second);      // same object, geometry already built
+    second.endDraw();
+
+    EXPECT_TRUE(pixelsIdentical(first, second));
+}
+
+// The caller's transform is composed at draw time rather than baked into the
+// cache, so one loaded document can be drawn at any scale. This is what lets a
+// panel follow the host's DPI without reloading.
+TEST_F(DrawingTest, SvgCachedHonoursCallerTransform)
+{
+    const auto path = assetPath("Fade.svg").string();
+
+    auto streamed = drawingContext.factory().createCpuRenderTarget({90, 760}, kRenderFlags);
+    streamed.beginDraw();
+    streamed.clear(Colors::White);
+    streamed.setTransform(makeScale(2.0f, 2.0f));
+    SvgParser::draw(streamed, path);
+    streamed.endDraw();
+
+    SvgParser::Svg svg;
+    ASSERT_TRUE(svg.loadFromFile(path));
+
+    auto cached = drawingContext.factory().createCpuRenderTarget({90, 760}, kRenderFlags);
+    cached.beginDraw();
+    cached.clear(Colors::White);
+    cached.setTransform(makeScale(2.0f, 2.0f));
+    svg.draw(cached);
+    cached.endDraw();
+
+    EXPECT_TRUE(pixelsIdentical(streamed, cached));
+}
+
+TEST_F(DrawingTest, SvgCachedRejectsMalformed)
+{
+    SvgParser::Svg svg;
+
+    EXPECT_FALSE(svg.loadFromMemory("this is not xml at all"));
+    EXPECT_TRUE(svg.empty());
+
+    // Well-formed XML, but no <svg> root.
+    EXPECT_FALSE(svg.loadFromMemory("<html><body/></html>"));
+    EXPECT_TRUE(svg.empty());
+
+    EXPECT_FALSE(svg.loadFromFile("no/such/file.svg"));
+    EXPECT_TRUE(svg.empty());
+}
+
+// Loading a second document must not leave the first one's shapes behind.
+TEST_F(DrawingTest, SvgCachedReloadReplacesContent)
+{
+    SvgParser::Svg svg;
+
+    ASSERT_TRUE(svg.loadFromFile(assetPath("Fade.svg").string()));
+    EXPECT_FALSE(svg.empty());
+    const auto fadeSize = svg.size();
+
+    ASSERT_TRUE(svg.loadFromMemory(
+        R"(<svg width="10" height="20"><rect width="10" height="20" fill="red"/></svg>)"));
+
+    EXPECT_EQ(svg.size().width,  10.f);
+    EXPECT_EQ(svg.size().height, 20.f);
+    EXPECT_NE(svg.size().width, fadeSize.width);
+}
