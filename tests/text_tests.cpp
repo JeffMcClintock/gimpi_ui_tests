@@ -1732,3 +1732,144 @@ TEST_F(DrawingTest, TextLayoutRejectsBadRuns)
         EXPECT_FALSE(drawingContext.factory().createTextLayout(text, tf, 60.f, 40.f, { runs, 2 }));
     }
 }
+
+// ---------------------------------------------------------------------------
+// Characterization: does this backend blend text differently on a float
+// target than on an 8-bit sRGB target?
+//
+// This exists to settle a design question with a measurement. The FP16
+// swapchain is the gold standard and blending is meant to be linear with one
+// encode at the end; the CPU engine's text path instead mixes glyph coverage
+// in sRGB space per pixel, calibrated against Direct2D references. Whether
+// that calibration reflects the gold standard depends on what Direct2D itself
+// does on a FLOAT target - so render the same text into both target flavours
+// and compare their weight in linear space. No golden image: the test prints
+// what it finds and asserts only sanity.
+// ---------------------------------------------------------------------------
+TEST_F(DrawingTest, TextWeightFloatVs8bit)
+{
+    constexpr uint32_t W = 96, H = 40;
+    auto tf = makeTextFormat(20.f);
+
+    auto renderText = [&](int32_t flags) {
+        auto rt = drawingContext.createCpuRenderTarget({ W, H }, flags);
+        rt.beginDraw();
+        rt.clear(Colors::White);
+        auto black = rt.createSolidColorBrush(Colors::Black);
+        rt.drawTextU("mgWY", tf, { 2.f, 2.f, 94.f, 38.f }, black);
+        rt.endDraw();
+        return rt;
+    };
+
+    auto rtFloat = renderText(0); // fp16, like the on-screen swapchain
+    auto rt8bit = renderText(static_cast<int32_t>(BitmapRenderTargetFlags::SRGBPixels));
+
+    // Read both back as LINEAR red-channel values in [0,1].
+    auto readLinear = [](BitmapRenderTarget& rt, std::vector<float>& out, uint32_t w, uint32_t h) {
+        auto bmp = rt.getBitmap();
+        auto px = bmp.lockPixels(BitmapLockFlags::Read);
+        const uint8_t* addr = px.getAddress();
+        const int32_t bpr = px.getBytesPerRow();
+        const bool isInt = px.isInteger();
+        const int32_t layout = px.channelLayout(); // 0=BGRA, 1=RGBA
+        const int iR = isInt ? ((layout == 0) ? 2 : 0) : 0;
+
+        out.resize(size_t(w) * h);
+        for (uint32_t y = 0; y < h; ++y)
+        {
+            const uint8_t* row = addr + size_t(y) * bpr;
+            for (uint32_t x = 0; x < w; ++x)
+            {
+                if (isInt)
+                    out[size_t(y) * w + x] = SRGBPixelToLinear(row[x * 4 + iR]);
+                else
+                    out[size_t(y) * w + x] = detail::halfToFloat(
+                        reinterpret_cast<const uint16_t*>(row)[x * 4 + iR]);
+            }
+        }
+    };
+
+    std::vector<float> linF, lin8;
+    readLinear(rtFloat, linF, W, H);
+    readLinear(rt8bit, lin8, W, H);
+
+    // Compare only antialiased pixels: partial coverage in EITHER rendering.
+    // Fully-black and fully-white pixels agree by construction and would
+    // dilute the statistic.
+    int aaCount = 0, floatLighter = 0, floatDarker = 0;
+    double sumF = 0, sum8 = 0, maxDelta = 0;
+    for (size_t i = 0; i < linF.size(); ++i)
+    {
+        const bool aa = (linF[i] > 0.02f && linF[i] < 0.98f) ||
+                        (lin8[i] > 0.02f && lin8[i] < 0.98f);
+        if (!aa)
+            continue;
+        ++aaCount;
+        sumF += linF[i];
+        sum8 += lin8[i];
+        const double d = double(linF[i]) - double(lin8[i]);
+        maxDelta = (std::max)(maxDelta, std::abs(d));
+        if (d > 0.004) ++floatLighter;      // float target's pixel is lighter
+        else if (d < -0.004) ++floatDarker;
+    }
+
+    ASSERT_GT(aaCount, 50) << "not enough antialiased pixels to measure";
+
+    printf("[TextWeight] %d AA pixels; mean linear value float=%.4f 8bit=%.4f; "
+           "float lighter on %d, darker on %d, max |delta|=%.4f\n",
+           aaCount, sumF / aaCount, sum8 / aaCount, floatLighter, floatDarker, maxDelta);
+
+    // Sanity only: both renderings drew the same glyphs somewhere.
+    EXPECT_GT(sumF, 0.0);
+    EXPECT_GT(sum8, 0.0);
+}
+
+// ---------------------------------------------------------------------------
+// Companion to CpuText.TextWeightSampleSheet: the same sheet rendered by this
+// platform backend (Direct2D on Windows), as the gold-standard visual
+// reference for the linear-vs-legacy text blending decision. Identical
+// geometry so the PNGs stack pixel-for-pixel in a composite.
+// ---------------------------------------------------------------------------
+TEST_F(DrawingTest, TextWeightSampleSheetReference)
+{
+    constexpr uint32_t W = 600, H = 176;
+    auto rt = drawingContext.createCpuRenderTarget({ W, H }, kRenderFlags);
+    rt.beginDraw();
+
+    auto lightBg = rt.createSolidColorBrush(colorFromHex(0xE0E0E0u));
+    auto darkBg = rt.createSolidColorBrush(colorFromHex(0x252525u));
+    rt.fillRectangle({ 0.f, 0.f, W / 2.f, float(H) }, lightBg);
+    rt.fillRectangle({ W / 2.f, 0.f, float(W), float(H) }, darkBg);
+
+    auto black = rt.createSolidColorBrush(Colors::Black);
+    auto white = rt.createSolidColorBrush(Colors::White);
+
+    const float sizes[] = { 10.f, 12.f, 16.f, 24.f };
+    const char* sample = "Pitch Gate 1 Pole LP mg";
+
+    float y = 6.f;
+    for (const float size : sizes)
+    {
+        auto tf = makeTextFormat(size);
+        AccessPtr::get(tf)->setWordWrapping(WordWrapping::NoWrap);
+        rt.drawTextU(sample, tf, { 8.f, y, W / 2.f - 4.f, y + size * 2.f }, black);
+        rt.drawTextU(sample, tf, { W / 2.f + 8.f, y, float(W), y + size * 2.f }, white);
+        y += size * 1.6f + 8.f;
+    }
+
+    {
+        auto tf = makeTextFormat(12.f);
+        AccessPtr::get(tf)->setWordWrapping(WordWrapping::NoWrap);
+        const char* label = "Direct2D (platform reference)";
+        rt.drawTextU(label, tf, { 8.f, y, W / 2.f - 4.f, y + 24.f }, black);
+        rt.drawTextU(label, tf, { W / 2.f + 8.f, y, float(W), y + 24.f }, white);
+    }
+
+    rt.endDraw();
+
+    auto bmp = rt.getBitmap();
+    const auto outPath = std::filesystem::path(REFERENCE_IMAGES_DIR) / "cpu_backend_preview"
+        / "text_weight_d2d.png";
+    savePng(outPath, bmp);
+    printf("[TextWeightSheet] wrote %s\n", outPath.string().c_str());
+}

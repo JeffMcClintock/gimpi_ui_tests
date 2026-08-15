@@ -1396,5 +1396,62 @@ TEST(CpuText, TextLayoutDeclinesStyleRuns)
     EXPECT_FALSE(ctx.factory.createTextLayout("Styled", format, 90.f, 40.f, { &run, 1 }));
 }
 
+// ---------------------------------------------------------------------------
+// Text-weight sample sheet: SE-realistic text at several sizes, dark-on-light
+// and light-on-dark, saved as a preview PNG. Its companion
+// DrawingTest.TextWeightSampleSheetReference renders the identical sheet with
+// the platform backend, so the two stack pixel-for-pixel to eyeball how the
+// linear blend + coverage warp tracks Direct2D across sizes and polarities.
+// Not a correctness test — it asserts nothing beyond "it drew".
+// ---------------------------------------------------------------------------
+TEST(CpuText, TextWeightSampleSheet)
+{
+    TextContext ctx;
+
+    constexpr uint32_t W = 600, H = 176;
+    auto rt = ctx.factory.createCpuRenderTarget({ W, H }, 0); // fp16, like the swapchain
+    rt.beginDraw();
+
+    // Left half: SE module-body light grey. Right half: a dark UI panel.
+    auto lightBg = rt.createSolidColorBrush(colorFromHex(0xE0E0E0u));
+    auto darkBg = rt.createSolidColorBrush(colorFromHex(0x252525u));
+    rt.fillRectangle({ 0.f, 0.f, W / 2.f, float(H) }, lightBg);
+    rt.fillRectangle({ W / 2.f, 0.f, float(W), float(H) }, darkBg);
+
+    auto black = rt.createSolidColorBrush(Colors::Black);
+    auto white = rt.createSolidColorBrush(Colors::White);
+
+    const float sizes[] = { 10.f, 12.f, 16.f, 24.f };
+    const char* sample = "Pitch Gate 1 Pole LP mg";
+
+    float y = 6.f;
+    for (const float size : sizes)
+    {
+        auto tf = ctx.makeFormat(size);
+        AccessPtr::get(tf)->setWordWrapping(WordWrapping::NoWrap);
+        rt.drawTextU(sample, tf, { 8.f, y, W / 2.f - 4.f, y + size * 2.f }, black);
+        rt.drawTextU(sample, tf, { W / 2.f + 8.f, y, float(W), y + size * 2.f }, white);
+        y += size * 1.6f + 8.f;
+    }
+
+    {
+        auto tf = ctx.makeFormat(12.f);
+        AccessPtr::get(tf)->setWordWrapping(WordWrapping::NoWrap);
+        const char* label = "CPU linear + luminance-keyed coverage warp";
+        rt.drawTextU(label, tf, { 8.f, y, W / 2.f - 4.f, y + 24.f }, black);
+        rt.drawTextU(label, tf, { W / 2.f + 8.f, y, float(W), y + 24.f }, white);
+    }
+
+    rt.endDraw();
+
+    auto bmp = rt.getBitmap();
+    const auto outPath = std::filesystem::path(REFERENCE_IMAGES_DIR) / "cpu_backend_preview"
+        / "text_weight_cpu.png";
+    savePng(outPath, bmp);
+    printf("[TextWeightSheet] wrote %s\n", outPath.string().c_str());
+
+    EXPECT_GT(inkFraction(bmp), 0.001f);
+}
+
 #endif // GMPI_UI_HAVE_FONT_PROVIDER
 
