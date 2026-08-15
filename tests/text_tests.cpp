@@ -1496,3 +1496,239 @@ TEST_F(DrawingTest, TextBaselineGridBodyHeight)
     bigRT.endDraw();
     EXPECT_TRUE(checkBitmapCorrelation("textBaselineGridBodyHeight", bigRT));
 }
+
+// ============================================================
+// ITextLayout — retained, immutable text layouts.
+//
+// The contract that makes a retained layout a drop-in replacement for an
+// existing drawTextU call site: a RUN-FREE layout must draw pixel-identically
+// to drawTextU with the same format over the rect {point, point + box}.
+// These tests render both ways into two render targets and compare bytes, so
+// they fail on a one-pixel baseline difference — which is exactly the failure
+// mode the D2D implementation had to be written carefully to avoid (drawTextU
+// shifts its rect up by the format's topAdjustment and snaps the baseline to a
+// half-pixel grid; the layout has to reproduce both).
+// ============================================================
+namespace
+{
+// True when the backend implements retained layouts at all (an optional
+// capability — the CPU and JUCE backends decline).
+bool textLayoutSupported(gmpi::drawing::Factory factory, gmpi::drawing::TextFormat& format)
+{
+    auto probe = factory.createTextLayout("x", format, 100.f, 100.f);
+    return static_cast<bool>(probe);
+}
+
+// Byte-for-byte comparison of two same-size render targets.
+::testing::AssertionResult pixelsIdentical(gmpi::drawing::BitmapRenderTarget& a,
+                                           gmpi::drawing::BitmapRenderTarget& b)
+{
+    auto bitmapA = a.getBitmap();
+    auto bitmapB = b.getBitmap();
+    auto pixelsA = bitmapA.lockPixels(gmpi::drawing::BitmapLockFlags::Read);
+    auto pixelsB = bitmapB.lockPixels(gmpi::drawing::BitmapLockFlags::Read);
+
+    const uint8_t* addrA = pixelsA.getAddress();
+    const uint8_t* addrB = pixelsB.getAddress();
+    const int32_t bprA = pixelsA.getBytesPerRow();
+    const int32_t bprB = pixelsB.getBytesPerRow();
+
+    if (bprA != bprB)
+        return ::testing::AssertionFailure() << "row-stride mismatch";
+
+    const auto sizeA = bitmapA.getSize();
+    const size_t total = static_cast<size_t>(bprA) * static_cast<size_t>(sizeA.height);
+
+    size_t differing = 0;
+    int maxDelta = 0;
+    for (size_t i = 0; i < total; ++i)
+    {
+        const int delta = std::abs(static_cast<int>(addrA[i]) - static_cast<int>(addrB[i]));
+        if (delta)
+        {
+            ++differing;
+            maxDelta = (std::max)(maxDelta, delta);
+        }
+    }
+
+    if (differing)
+        return ::testing::AssertionFailure()
+            << differing << " of " << total << " bytes differ, max delta " << maxDelta;
+
+    return ::testing::AssertionSuccess();
+}
+} // namespace
+
+// The core parity contract, at the default alignment.
+TEST_F(DrawingTest, TextLayoutMatchesDrawText)
+{
+    auto tf = makeTextFormat(16.f);
+    if (!textLayoutSupported(drawingContext.factory(), tf))
+        GTEST_SKIP() << "backend has no retained-text-layout support";
+
+    constexpr gmpi::drawing::Point origin{ 3.f, 5.f };
+    constexpr float boxW = 58.f, boxH = 40.f;
+    const std::string_view text = "Layout";
+
+    // Reference: the existing drawTextU path.
+    g.clear(Colors::White);
+    auto brush = g.createSolidColorBrush(Colors::Black);
+    g.drawTextU(text, tf, { origin.x, origin.y, origin.x + boxW, origin.y + boxH }, brush);
+    g.endDraw();
+    drawingActive = false;
+
+    // Candidate: the retained layout, same format, same box.
+    auto g2 = drawingContext.createCpuRenderTarget({ kWidth, kHeight }, kRenderFlags);
+    g2.beginDraw();
+    g2.clear(Colors::White);
+    auto brush2 = g2.createSolidColorBrush(Colors::Black);
+    auto layout = drawingContext.factory().createTextLayout(text, tf, boxW, boxH);
+    ASSERT_TRUE(layout);
+    g2.drawTextLayout(layout, origin, brush2);
+    g2.endDraw();
+
+    EXPECT_TRUE(pixelsIdentical(g, g2));
+}
+
+// Parity has to survive the format settings SynthEdit's structure view uses:
+// trailing alignment and uniform line spacing over a multi-line string (the
+// pin-name columns depend on both).
+TEST_F(DrawingTest, TextLayoutMatchesDrawTextTrailingMultiline)
+{
+    auto tf = makeTextFormat(10.f);
+    if (!textLayoutSupported(drawingContext.factory(), tf))
+        GTEST_SKIP() << "backend has no retained-text-layout support";
+
+    tf.setTextAlignment(TextAlignment::Trailing);
+    tf.setLineSpacing(12.f, 10.f);
+
+    constexpr gmpi::drawing::Point origin{ 2.f, 1.f };
+    constexpr float boxW = 60.f, boxH = 60.f;
+    const std::string_view text = "Pitch\nGate\n\nLevel";
+
+    g.clear(Colors::White);
+    auto brush = g.createSolidColorBrush(Colors::Black);
+    g.drawTextU(text, tf, { origin.x, origin.y, origin.x + boxW, origin.y + boxH }, brush);
+    g.endDraw();
+    drawingActive = false;
+
+    auto g2 = drawingContext.createCpuRenderTarget({ kWidth, kHeight }, kRenderFlags);
+    g2.beginDraw();
+    g2.clear(Colors::White);
+    auto brush2 = g2.createSolidColorBrush(Colors::Black);
+    auto layout = drawingContext.factory().createTextLayout(text, tf, boxW, boxH);
+    ASSERT_TRUE(layout);
+    g2.drawTextLayout(layout, origin, brush2);
+    g2.endDraw();
+
+    EXPECT_TRUE(pixelsIdentical(g, g2));
+}
+
+// The extent is measured once at creation and must agree with what the format
+// reports for the same text at the same width.
+TEST_F(DrawingTest, TextLayoutExtentMatchesFormat)
+{
+    auto tf = makeTextFormat(14.f);
+    if (!textLayoutSupported(drawingContext.factory(), tf))
+        GTEST_SKIP() << "backend has no retained-text-layout support";
+
+    const std::string_view text = "Extent";
+    constexpr float boxW = 200.f;
+
+    auto layout = drawingContext.factory().createTextLayout(text, tf, boxW, 100.f);
+    ASSERT_TRUE(layout);
+
+    const auto fromFormat = tf.getTextExtentU(text, boxW);
+    const auto fromLayout = layout.getTextExtentU();
+
+    EXPECT_FLOAT_EQ(fromFormat.width, fromLayout.width);
+    EXPECT_FLOAT_EQ(fromFormat.height, fromLayout.height);
+}
+
+// Styling runs: an all-zero run must be a no-op that inherits the base format,
+// and a bold run must actually change the rendering.
+TEST_F(DrawingTest, TextLayoutStyleRuns)
+{
+    auto tf = makeTextFormat(16.f);
+    if (!textLayoutSupported(drawingContext.factory(), tf))
+        GTEST_SKIP() << "backend has no retained-text-layout support";
+
+    const std::string_view text = "AaBbCc";
+    constexpr gmpi::drawing::Point origin{ 2.f, 4.f };
+    constexpr float boxW = 60.f, boxH = 40.f;
+
+    // Plain.
+    g.clear(Colors::White);
+    auto brush = g.createSolidColorBrush(Colors::Black);
+    auto plain = drawingContext.factory().createTextLayout(text, tf, boxW, boxH);
+    ASSERT_TRUE(plain);
+    g.drawTextLayout(plain, origin, brush);
+    g.endDraw();
+    drawingActive = false;
+
+    {   // An all-zero run inherits everything -> must equal the plain rendering.
+        gmpi::drawing::TextStyleRun inheritRun{};
+        inheritRun.begin = 0;
+        inheritRun.length = static_cast<int32_t>(text.size());
+
+        auto g2 = drawingContext.createCpuRenderTarget({ kWidth, kHeight }, kRenderFlags);
+        g2.beginDraw();
+        g2.clear(Colors::White);
+        auto brush2 = g2.createSolidColorBrush(Colors::Black);
+        auto inherited = drawingContext.factory().createTextLayout(text, tf, boxW, boxH, { &inheritRun, 1 });
+        ASSERT_TRUE(inherited);
+        g2.drawTextLayout(inherited, origin, brush2);
+        g2.endDraw();
+
+        EXPECT_TRUE(pixelsIdentical(g, g2)) << "an all-zero run must inherit the base format";
+    }
+
+    {   // A bold run must actually change the pixels.
+        gmpi::drawing::TextStyleRun boldRun{};
+        boldRun.begin = 0;
+        boldRun.length = 2;
+        boldRun.flags = gmpi::drawing::TextStyleFlags::HasFontWeight;
+        boldRun.fontWeight = FontWeight::Bold;
+
+        auto g3 = drawingContext.createCpuRenderTarget({ kWidth, kHeight }, kRenderFlags);
+        g3.beginDraw();
+        g3.clear(Colors::White);
+        auto brush3 = g3.createSolidColorBrush(Colors::Black);
+        auto bold = drawingContext.factory().createTextLayout(text, tf, boxW, boxH, { &boldRun, 1 });
+        ASSERT_TRUE(bold);
+        g3.drawTextLayout(bold, origin, brush3);
+        g3.endDraw();
+
+        EXPECT_FALSE(pixelsIdentical(g, g3)) << "a bold run should have changed the rendering";
+    }
+}
+
+// Runs that split a codepoint, overlap, or run past the end are a programming
+// error: creation fails loudly rather than clamping into something plausible.
+TEST_F(DrawingTest, TextLayoutRejectsBadRuns)
+{
+    auto tf = makeTextFormat(12.f);
+    if (!textLayoutSupported(drawingContext.factory(), tf))
+        GTEST_SKIP() << "backend has no retained-text-layout support";
+
+    const std::string_view text = "abécd"; // the accented char is two UTF-8 bytes
+
+    {   // past the end
+        gmpi::drawing::TextStyleRun run{};
+        run.begin = 0;
+        run.length = static_cast<int32_t>(text.size()) + 1;
+        EXPECT_FALSE(drawingContext.factory().createTextLayout(text, tf, 60.f, 40.f, { &run, 1 }));
+    }
+    {   // starts inside a multi-byte sequence
+        gmpi::drawing::TextStyleRun run{};
+        run.begin = 3;
+        run.length = 1;
+        EXPECT_FALSE(drawingContext.factory().createTextLayout(text, tf, 60.f, 40.f, { &run, 1 }));
+    }
+    {   // overlapping / unsorted
+        gmpi::drawing::TextStyleRun runs[2]{};
+        runs[0].begin = 0; runs[0].length = 4;
+        runs[1].begin = 2; runs[1].length = 2;
+        EXPECT_FALSE(drawingContext.factory().createTextLayout(text, tf, 60.f, 40.f, { runs, 2 }));
+    }
+}
