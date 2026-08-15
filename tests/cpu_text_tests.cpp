@@ -1258,4 +1258,143 @@ TEST(CpuText, WithoutTextEngineReportsNoSupport)
     EXPECT_EQ(raw, nullptr);
 }
 
+
+// ---------------------------------------------------------------------------
+// Retained text layouts (ITextLayout) on the CPU backend.
+//
+// drawTextU re-runs itemisation, line breaking and HarfBuzz shaping on every
+// call; a retained layout does that once and keeps the result. Parity is
+// structural — drawText is "lay out, then renderLaidOut", and the layout hands
+// the same LaidOut to the same renderLaidOut — so these compare bytes and
+// expect an exact match, which would catch any drift in that reasoning.
+// ---------------------------------------------------------------------------
+namespace
+{
+// Byte-for-byte comparison of two same-size render targets.
+::testing::AssertionResult cpuPixelsIdentical(BitmapRenderTarget& a, BitmapRenderTarget& b)
+{
+    auto bitmapA = a.getBitmap();
+    auto bitmapB = b.getBitmap();
+    auto pixelsA = bitmapA.lockPixels(BitmapLockFlags::Read);
+    auto pixelsB = bitmapB.lockPixels(BitmapLockFlags::Read);
+
+    const auto size = bitmapA.getSize();
+    const int32_t bpr = pixelsA.getBytesPerRow();
+    if (bpr != pixelsB.getBytesPerRow())
+        return ::testing::AssertionFailure() << "row-stride mismatch";
+
+    const size_t total = size_t(bpr) * size_t(size.height);
+    size_t differing = 0;
+    for (size_t i = 0; i < total; ++i)
+        if (pixelsA.getAddress()[i] != pixelsB.getAddress()[i])
+            ++differing;
+
+    if (differing)
+        return ::testing::AssertionFailure() << differing << " of " << total << " bytes differ";
+
+    return ::testing::AssertionSuccess();
+}
+} // namespace
+
+// The parity contract: a run-free retained layout draws exactly what drawTextU
+// draws for the same format over {point, point + box}.
+TEST(CpuText, TextLayoutMatchesDrawText)
+{
+    TextContext ctx;
+    auto format = ctx.makeFormat(14.0f);
+    ASSERT_NE(AccessPtr::get(format), nullptr);
+
+    constexpr Point origin{ 2.f, 2.f };
+    constexpr float boxW = 92.f, boxH = 44.f;
+    const std::string_view text = "Hello layout";
+
+    auto layout = ctx.factory.createTextLayout(text, format, boxW, boxH);
+    ASSERT_TRUE(layout) << "CPU backend should support retained layouts";
+
+    auto rtA = ctx.makeTarget();
+    rtA.beginDraw();
+    rtA.clear(Colors::White);
+    auto brushA = rtA.createSolidColorBrush(Colors::Black);
+    rtA.drawTextU(text, format, { origin.x, origin.y, origin.x + boxW, origin.y + boxH }, brushA);
+    rtA.endDraw();
+
+    auto rtB = ctx.makeTarget();
+    rtB.beginDraw();
+    rtB.clear(Colors::White);
+    auto brushB = rtB.createSolidColorBrush(Colors::Black);
+    rtB.drawTextLayout(layout, origin, brushB);
+    rtB.endDraw();
+
+    EXPECT_TRUE(cpuPixelsIdentical(rtA, rtB));
+}
+
+// The same, with the settings SynthEdit's pin columns use: trailing alignment
+// and uniform line spacing over a multi-line string including a blank line.
+TEST(CpuText, TextLayoutMatchesDrawTextTrailingMultiline)
+{
+    TextContext ctx;
+    auto format = ctx.makeFormat(10.0f);
+    ASSERT_NE(AccessPtr::get(format), nullptr);
+    format.setTextAlignment(TextAlignment::Trailing);
+    format.setLineSpacing(12.f, 10.f);
+
+    constexpr Point origin{ 3.f, 1.f };
+    constexpr float boxW = 90.f, boxH = 46.f;
+    const std::string_view text = "Pitch\nGate\n\nLevel";
+
+    auto layout = ctx.factory.createTextLayout(text, format, boxW, boxH);
+    ASSERT_TRUE(layout);
+
+    auto rtA = ctx.makeTarget();
+    rtA.beginDraw();
+    rtA.clear(Colors::White);
+    auto brushA = rtA.createSolidColorBrush(Colors::Black);
+    rtA.drawTextU(text, format, { origin.x, origin.y, origin.x + boxW, origin.y + boxH }, brushA);
+    rtA.endDraw();
+
+    auto rtB = ctx.makeTarget();
+    rtB.beginDraw();
+    rtB.clear(Colors::White);
+    auto brushB = rtB.createSolidColorBrush(Colors::Black);
+    rtB.drawTextLayout(layout, origin, brushB);
+    rtB.endDraw();
+
+    EXPECT_TRUE(cpuPixelsIdentical(rtA, rtB));
+}
+
+// The extent is measured once at creation and agrees with the format.
+TEST(CpuText, TextLayoutExtentMatchesFormat)
+{
+    TextContext ctx;
+    auto format = ctx.makeFormat(16.0f);
+    const std::string_view text = "Extent";
+    constexpr float boxW = 200.f;
+
+    auto layout = ctx.factory.createTextLayout(text, format, boxW, 100.f);
+    ASSERT_TRUE(layout);
+
+    const auto fromFormat = format.getTextExtentU(text, boxW);
+    const auto fromLayout = layout.getTextExtentU();
+
+    EXPECT_FLOAT_EQ(fromFormat.width, fromLayout.width);
+    EXPECT_FLOAT_EQ(fromFormat.height, fromLayout.height);
+}
+
+// Styling runs are declined for now (no per-run colour in the rasteriser), and
+// declining must be a clean null rather than a broken layout.
+TEST(CpuText, TextLayoutDeclinesStyleRuns)
+{
+    TextContext ctx;
+    auto format = ctx.makeFormat(14.0f);
+
+    TextStyleRun run{};
+    run.begin = 0;
+    run.length = 3;
+    run.flags = TextStyleFlags::HasFontWeight;
+    run.fontWeight = FontWeight::Bold;
+
+    EXPECT_FALSE(ctx.factory.createTextLayout("Styled", format, 90.f, 40.f, { &run, 1 }));
+}
+
 #endif // GMPI_UI_HAVE_FONT_PROVIDER
+
