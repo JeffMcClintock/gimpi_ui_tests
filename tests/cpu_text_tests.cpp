@@ -1304,7 +1304,9 @@ TEST(CpuText, TextLayoutMatchesDrawText)
     auto format = ctx.makeFormat(14.0f);
     ASSERT_NE(AccessPtr::get(format), nullptr);
 
-    constexpr Point origin{ 2.f, 2.f };
+    // Qualified: macOS drags in the classic QuickDraw `Point` from MacTypes.h,
+    // which is ambiguous with gmpi::drawing::Point under the using-directive.
+    constexpr gmpi::drawing::Point origin{ 2.f, 2.f };
     constexpr float boxW = 92.f, boxH = 44.f;
     const std::string_view text = "Hello layout";
 
@@ -1338,7 +1340,7 @@ TEST(CpuText, TextLayoutMatchesDrawTextTrailingMultiline)
     format.setTextAlignment(TextAlignment::Trailing);
     format.setLineSpacing(12.f, 10.f);
 
-    constexpr Point origin{ 3.f, 1.f };
+    constexpr gmpi::drawing::Point origin{ 3.f, 1.f };
     constexpr float boxW = 90.f, boxH = 46.f;
     const std::string_view text = "Pitch\nGate\n\nLevel";
 
