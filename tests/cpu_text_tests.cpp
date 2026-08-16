@@ -917,14 +917,42 @@ TEST(CpuText, FallbackSharesOneCopyPerFontFile)
                 unsigned(data.bytes.size()), HB_MEMORY_MODE_READONLY, nullptr, nullptr);
             const unsigned faces = hb_face_count(blob);
             printf("[Fallback] blob holds %u face(s); chosen index %u\n", faces, data.faceIndex);
-            for (unsigned i = 0; i < faces && i < 24; ++i)
+            for (unsigned i = 0; i < faces && i < 4; ++i)
             {
                 hb_face_t* face = hb_face_create(blob, i);
                 hb_font_t* font = hb_font_create(face);
                 hb_codepoint_t gid{};
                 const bool mapped = hb_font_get_nominal_glyph(font, 0x4E00, &gid);
-                printf("[Fallback]   face[%u]: %u glyphs, U+4E00 -> %s (gid %u)\n",
-                       i, hb_face_get_glyph_count(face), mapped ? "mapped" : "UNMAPPED", gid);
+
+                // Which outline flavour the face carries, and whether HarfBuzz
+                // can actually DRAW the mapped glyph — a face can map a
+                // codepoint yet produce an empty outline (that is the mapped-
+                // advances-but-zero-ink signature this diagnostic exists for).
+                auto tableSize = [face](hb_tag_t tag) {
+                    hb_blob_t* t = hb_face_reference_table(face, tag);
+                    const unsigned n = hb_blob_get_length(t);
+                    hb_blob_destroy(t);
+                    return n;
+                };
+                unsigned segments = 0;
+                hb_draw_funcs_t* funcs = hb_draw_funcs_create();
+                hb_draw_funcs_set_move_to_func(funcs,
+                    [](hb_draw_funcs_t*, void* c, hb_draw_state_t*, float, float, void*) { ++*static_cast<unsigned*>(c); }, nullptr, nullptr);
+                hb_draw_funcs_set_line_to_func(funcs,
+                    [](hb_draw_funcs_t*, void* c, hb_draw_state_t*, float, float, void*) { ++*static_cast<unsigned*>(c); }, nullptr, nullptr);
+                hb_draw_funcs_set_quadratic_to_func(funcs,
+                    [](hb_draw_funcs_t*, void* c, hb_draw_state_t*, float, float, float, float, void*) { ++*static_cast<unsigned*>(c); }, nullptr, nullptr);
+                hb_draw_funcs_set_cubic_to_func(funcs,
+                    [](hb_draw_funcs_t*, void* c, hb_draw_state_t*, float, float, float, float, float, float, void*) { ++*static_cast<unsigned*>(c); }, nullptr, nullptr);
+                hb_font_draw_glyph(font, gid, funcs, &segments);
+                hb_draw_funcs_destroy(funcs);
+
+                printf("[Fallback]   face[%u]: %u glyphs, U+4E00 -> %s (gid %u); "
+                       "glyf %u, loca %u, CFF %u, CFF2 %u; draw segments %u\n",
+                       i, hb_face_get_glyph_count(face), mapped ? "mapped" : "UNMAPPED", gid,
+                       tableSize(HB_TAG('g','l','y','f')), tableSize(HB_TAG('l','o','c','a')),
+                       tableSize(HB_TAG('C','F','F',' ')), tableSize(HB_TAG('C','F','F','2')),
+                       segments);
                 hb_font_destroy(font);
                 hb_face_destroy(face);
             }
