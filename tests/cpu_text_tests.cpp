@@ -905,6 +905,31 @@ TEST(CpuText, FallbackSharesOneCopyPerFontFile)
         const bool ok = gmpi::drawing::findFont(req, data);
         printf("[Fallback] findFont(cover U+4E00) -> %s, file '%s', %zu bytes, faceIndex %u\n",
                ok ? "ok" : "FAILED", data.resolvedName.c_str(), data.bytes.size(), data.faceIndex);
+
+        // And what HarfBuzz sees in that blob — .ttc collections hold many
+        // faces, and a provider that cannot say WHICH face was matched
+        // (CoreText has no public API for the index) may hand the engine the
+        // wrong one. Print every face's glyph count and whether it maps the
+        // probe codepoint, so a wrong index is visible as data.
+        if (ok && !data.bytes.empty())
+        {
+            hb_blob_t* blob = hb_blob_create(reinterpret_cast<const char*>(data.bytes.data()),
+                unsigned(data.bytes.size()), HB_MEMORY_MODE_READONLY, nullptr, nullptr);
+            const unsigned faces = hb_face_count(blob);
+            printf("[Fallback] blob holds %u face(s); chosen index %u\n", faces, data.faceIndex);
+            for (unsigned i = 0; i < faces && i < 24; ++i)
+            {
+                hb_face_t* face = hb_face_create(blob, i);
+                hb_font_t* font = hb_font_create(face);
+                hb_codepoint_t gid{};
+                const bool mapped = hb_font_get_nominal_glyph(font, 0x4E00, &gid);
+                printf("[Fallback]   face[%u]: %u glyphs, U+4E00 -> %s (gid %u)\n",
+                       i, hb_face_get_glyph_count(face), mapped ? "mapped" : "UNMAPPED", gid);
+                hb_font_destroy(font);
+                hb_face_destroy(face);
+            }
+            hb_blob_destroy(blob);
+        }
     }
 
     // 40 distinct CJK codepoints.
