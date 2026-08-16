@@ -893,6 +893,20 @@ TEST(CpuText, FallbackSharesOneCopyPerFontFile)
     auto format = ctx.makeFormat(16.0f, kTestFont);
     ASSERT_NE(AccessPtr::get(format), nullptr);
 
+    // Say what the platform fallback resolves CJK to — when this test fails
+    // with real advances but zero ink, the answer is usually "nothing", and
+    // this line is the difference between a diagnosis and a guess (it was,
+    // on the macOS CI runner).
+    {
+        gmpi::drawing::FontRequest req;
+        req.familyName = kTestFont;
+        req.mustCoverCodepoint = 0x4E00;
+        gmpi::drawing::FontData data;
+        const bool ok = gmpi::drawing::findFont(req, data);
+        printf("[Fallback] findFont(cover U+4E00) -> %s, file '%s', %zu bytes, faceIndex %u\n",
+               ok ? "ok" : "FAILED", data.resolvedName.c_str(), data.bytes.size(), data.faceIndex);
+    }
+
     // 40 distinct CJK codepoints.
     std::string many;
     for (uint32_t cp = 0x4E00; cp < 0x4E00 + 40; ++cp)
