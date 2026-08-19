@@ -19,7 +19,7 @@ class LayoutTest : public DrawingTest {};
 
 namespace gmpi::ui::builder
 {
-    void View::setDirty() { dirty = true; }
+    void View::setDirty() const { dirty = true; }
     void View::clear2() {}
     void View::OnModelWillChange() { setDirty(); }
 
