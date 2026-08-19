@@ -14,6 +14,19 @@ include(FetchContent)
 # ---------------------------------------------------------------------------
 # Local override: set GMPI_UI_FOLDER_OVERRIDE to your local gmpi_ui clone
 # to skip the GitHub fetch (e.g. -DGMPI_UI_FOLDER_OVERRIDE=C:/SE/gmpi_ui)
+#
+# CI SETS NEITHER OVERRIDE. .github/workflows/cmake-tests.yml configures with a
+# bare `cmake -S . -B build`, so it takes the fetch path below and builds
+# against gmpi_ui and GMPI at their GitHub origin/main - never against whatever
+# is checked out beside it. A test here can therefore only depend on gmpi_ui
+# code that has already LANDED on gmpi_ui's main.
+#
+# This is invisible in git status, and it bites hardest when a change spans the
+# two repos: the local build passes with the override pointed at a work branch,
+# then CI fetches an origin/main that knows nothing about it. Push gmpi_ui
+# first, then here. (Aug 2026: tests/c_projection_calls.c is exactly such a
+# test - it is compiled as C and will not compile at all against a gmpi_ui
+# whose plain-C projection predates the resync.)
 # ---------------------------------------------------------------------------
 set(GMPI_UI_FOLDER_OVERRIDE "" CACHE PATH
     "Path to a local gmpi_ui repo, or blank to fetch from GitHub.")
