@@ -145,6 +145,7 @@ add_executable(gmpi_ui_tests
     tests/drawing_math_tests.cpp
     tests/cpu_present_tests.cpp
     tests/svg_tests.cpp
+    tests/drawing_abi_tests.cpp
     ${DRAWING_TEST_CONTEXT_SRC}
     ${GMPI_UI_SDK}/backends/DirectXGfx.cpp
     ${GMPI_UI_SDK}/experimental/grid.cpp
