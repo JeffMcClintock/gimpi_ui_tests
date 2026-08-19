@@ -4,6 +4,11 @@ project(gmpi_ui_tests)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# tests/c_projection_calls.c exercises the plain-C drawing projection from a
+# real C compiler; C11 for _Static_assert.
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+
 include(FetchContent)
 
 # ---------------------------------------------------------------------------
@@ -146,6 +151,8 @@ add_executable(gmpi_ui_tests
     tests/cpu_present_tests.cpp
     tests/svg_tests.cpp
     tests/drawing_abi_tests.cpp
+    tests/drawing_c_projection_tests.cpp
+    tests/c_projection_calls.c
     ${DRAWING_TEST_CONTEXT_SRC}
     ${GMPI_UI_SDK}/backends/DirectXGfx.cpp
     ${GMPI_UI_SDK}/experimental/grid.cpp
@@ -156,6 +163,10 @@ add_executable(gmpi_ui_tests
 target_include_directories(gmpi_ui_tests PRIVATE
     ${GMPI_UI_SDK}
     ${GMPI_SDK}
+    # the plain-C projections, for the C-projection ABI tests: gmpi_drawing.h
+    # from gmpi_ui, and the gmpi.h it sits on from the GMPI core repo
+    ${GMPI_UI_SDK}/projections/plain_c
+    ${GMPI_SDK}/Projections/plain_c/Core
 )
 
 # Add headers so they appear in the Xcode project navigator and are searchable.
