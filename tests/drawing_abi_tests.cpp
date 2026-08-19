@@ -14,9 +14,16 @@
 // breaking it a build failure instead of a customer's crash report.
 //
 // Itanium ABI only (Linux, macOS): a pointer to a virtual member function
-// encodes its byte offset into the vtable, plus one, in the first word. MSVC
-// uses thunks instead, so the check compiles away there — single-inheritance
-// layout is the same on all three, so pinning two platforms pins the third.
+// encodes its byte offset into the vtable in the first word. MSVC uses thunks
+// instead, so the check compiles away there — single-inheritance layout is the
+// same on all three, so pinning two platforms pins the third.
+//
+// The exact encoding varies: x86-64 stores offset+1 and flags "virtual" in that
+// low bit, while AAPCS64 (Apple silicon) stores the offset as-is and flags
+// virtual in the adjustment word. Rather than branch on the platform and be
+// wrong on the next one, calibrate: IUnknown::queryInterface is the first
+// virtual of the root interface, so it is slot 0 by definition, and whatever
+// raw value the compiler encodes for it is this encoding's bias.
 
 #include <gtest/gtest.h>
 
@@ -30,9 +37,9 @@
 
 namespace
 {
-// The offset+1 encoding above, decoded back to a slot index.
+// The raw first word of a pointer-to-member-function.
 template <class MemberFunction>
-std::size_t vtableSlotOf(MemberFunction pmf)
+std::uintptr_t rawMemberPointer(MemberFunction pmf)
 {
     struct ItaniumMemberPointer
     {
@@ -43,9 +50,16 @@ std::size_t vtableSlotOf(MemberFunction pmf)
     static_assert(sizeof(MemberFunction) == sizeof(raw),
                   "not the Itanium member-pointer representation this decodes");
     std::memcpy(&raw, &pmf, sizeof(raw));
+    return raw.ptr;
+}
 
-    EXPECT_TRUE(raw.ptr & 1u) << "not a virtual member function";
-    return (raw.ptr - 1) / sizeof(void*);
+// Slot 0 of the root interface: whatever it encodes to is this ABI's bias.
+const std::uintptr_t encodingBias = rawMemberPointer(&gmpi::api::IUnknown::queryInterface);
+
+template <class MemberFunction>
+std::size_t vtableSlotOf(MemberFunction pmf)
+{
+    return (rawMemberPointer(pmf) - encodingBias) / sizeof(void*);
 }
 
 constexpr const char* kWhatToDo =
