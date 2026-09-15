@@ -212,6 +212,24 @@ protected:
         g = {};
     }
 
+    // Byte offset of each channel within a 32bpp pixel, for a channel layout as
+    // reported by IBitmapPixels::getPixelFormat(). Every backend agrees on the
+    // bit-encoding; they do not agree on the order (Direct2D and the CPU backend
+    // BGRA, CoreGraphics RGBA), and both sides of a comparison must be read
+    // through their OWN layout before a byte from one is subtracted from a byte
+    // of the other.
+    struct ChannelOffsets { int r, g, b, a; };
+    static constexpr ChannelOffsets channelOffsets(int32_t layout)
+    {
+        switch (layout)
+        {
+            case 1:  return { 0, 1, 2, 3 }; // RGBA
+            case 2:  return { 1, 2, 3, 0 }; // ARGB
+            case 3:  return { 3, 2, 1, 0 }; // ABGR
+            default: return { 2, 1, 0, 3 }; // BGRA
+        }
+    }
+
     // Core comparison helper — works with any already-ended BitmapRenderTarget.
     // tolerance:       per-channel difference allowed before a pixel counts as differing.
     // maxMeanDiff:     maximum allowed mean per-channel diff across DIFFERING pixels only
@@ -273,13 +291,17 @@ protected:
         const int32_t  refBpr  = refPixels.getBytesPerRow();
         const int32_t  refBpp  = refPixels.getBytesPerPixel();
 
-        // Channel indices from the reference format (loaded PNG).
-        // Layout 0=BGRA, 1=RGBA.
-        const int32_t refLayout = refPixels.channelLayout();
-        const int iR = (refLayout == 0) ? 2 : 0;
-        const int iG = 1;
-        const int iB = (refLayout == 0) ? 0 : 2;
-        const int iA = 3;
+        // Channel indices from the reference format (loaded PNG), and - just
+        // as important - from the RENDERED surface's own format. The two are
+        // not the same on every platform: Direct2D and the CPU backend lock
+        // 32bpp sRGB as BGRA, CoreGraphics as RGBA (kCGBitmapByteOrder32Big),
+        // which is why getPixelFormat() reports the layout at all.
+        const auto refOrder = channelOffsets(refPixels.channelLayout());
+        const auto ourOrder = channelOffsets(ourPixels.channelLayout());
+        const int iR = refOrder.r;
+        const int iG = refOrder.g;
+        const int iB = refOrder.b;
+        const int iA = refOrder.a;
 
         int     diffCount   = 0;
         int     maxChanDiff = 0;
@@ -294,17 +316,25 @@ protected:
 
                 if (ourBpp == 4)
                 {
-                    // 32bppPBGRA: premultiplied BGRA 8-bit, ALREADY sRGB — for a
-                    // render target created with SRGBPixels as well as for a
-                    // loaded image, since the render-target face stopped storing
+                    // 32bpp premultiplied 8-bit, ALREADY sRGB — for a render
+                    // target created with SRGBPixels as well as for a loaded
+                    // image, since the render-target face stopped storing
                     // linear values (contract note above
                     // cpugfx::Factory::loadImageU). So un-premultiply and stop;
                     // the bytes are already in the reference's encoding.
+                    //
+                    // Read through ourOrder, never a fixed BGRA: this branch used
+                    // to assume Direct2D's byte order on every backend, which on
+                    // macOS (RGBA) swapped R and B in the rendered image only. A
+                    // grey reference image cannot see that — R==B — so it stayed
+                    // hidden until a reference with a saturated colour in it
+                    // (SynthEdit's blue panel skin) put 132/255 on two channels
+                    // of 80% of the pixels.
                     constexpr float inv255 = 1.0f / 255.0f;
-                    float fb = p[0] * inv255;
-                    float fg = p[1] * inv255;
-                    float fr = p[2] * inv255;
-                    float fa = p[3] * inv255;
+                    float fr = p[ourOrder.r] * inv255;
+                    float fg = p[ourOrder.g] * inv255;
+                    float fb = p[ourOrder.b] * inv255;
+                    float fa = p[ourOrder.a] * inv255;
 
                     uint8_t a = static_cast<uint8_t>(std::clamp(fa * 255.0f + 0.5f, 0.0f, 255.0f));
                     if (fa > 0.0f)
@@ -325,9 +355,9 @@ protected:
                 }
                 else if (ourIsSRGB)
                 {
-                    // Already sRGB — channel order matches reference. Copy directly.
-                    rendered[0] = p[0]; rendered[1] = p[1];
-                    rendered[2] = p[2]; rendered[3] = p[3];
+                    // Already sRGB — re-order into the reference's channel order.
+                    rendered[iR] = p[ourOrder.r]; rendered[iG] = p[ourOrder.g];
+                    rendered[iB] = p[ourOrder.b]; rendered[iA] = p[ourOrder.a];
                 }
                 else
                 {
