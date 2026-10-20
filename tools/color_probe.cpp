@@ -188,7 +188,7 @@ struct Options
 //   none           a plain visual (the control: DWM may promote it to an overlay plane)
 //   opacity:<v>    an effect group with that opacity (the frame shipped 0.99 until 2026-10-21)
 //   3d             an identity 3D matrix transform
-//   rot3d:<deg>    a rotation about the Y axis (the frame ships 0.01)
+//   rot3d:<deg>    a rotation about the Y axis (the frame ships 0.1; DWM ignores 0.002 and below, 1 resamples)
 //   clip:<radius>  a rounded-rectangle clip with that corner radius, in pixels
 class ProbeFrame final : public gmpi::hosting::DrawingFrame
 {
