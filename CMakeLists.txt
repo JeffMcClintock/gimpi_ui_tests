@@ -252,3 +252,32 @@ endif()
 enable_testing()
 include(GoogleTest)
 gtest_discover_tests(gmpi_ui_tests)
+
+# ---------------------------------------------------------------------------
+# Colour probe (Windows, manual): tools/color_probe.cpp shows a gmpi_ui frame
+# of colour patches on a chosen monitor/adapter and reads the screen back.
+# Needs a desktop, so it is not a test and not built by default:
+#   cmake --build build --target gmpi_ui_color_probe --config Release
+# ---------------------------------------------------------------------------
+if(WIN32)
+    add_executable(gmpi_ui_color_probe EXCLUDE_FROM_ALL
+        tools/color_probe.cpp
+        ${GMPI_UI_SDK}/backends/DrawingFrameCommon.cpp
+        ${GMPI_UI_SDK}/backends/DrawingFrameWin.cpp
+        ${GMPI_UI_SDK}/backends/DirectXGfx.cpp
+        ${GMPI_UI_SDK}/helpers/Timer.cpp
+    )
+    target_include_directories(gmpi_ui_color_probe PRIVATE
+        ${GMPI_UI_SDK}
+        ${GMPI_SDK}
+        ${GMPI_SDK}/Core
+    )
+    target_compile_definitions(gmpi_ui_color_probe PRIVATE
+        UNICODE _UNICODE
+        $<$<CONFIG:Debug>:_DEBUG>
+        $<$<CONFIG:Release>:NDEBUG>
+    )
+    target_link_libraries(gmpi_ui_color_probe PRIVATE
+        d3d11 d2d1 dwrite WindowsCodecs dxgi Dwmapi dxguid ole32
+    )
+endif()
