@@ -381,7 +381,11 @@ public:
 		while (GetTickCount64() < start + ms)
 		{
 			if (present)
-				frame_.invalidateRect(nullptr);
+			{
+				// Alternate whole-frame and small dirty rects, so partial presents are exercised too.
+				const Rect corner{ 10.0f, 10.0f, 50.0f, 50.0f };
+				frame_.invalidateRect((++presentTick_ & 1) ? nullptr : &corner);
+			}
 			while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&msg); DispatchMessageW(&msg); }
 			MsgWaitForMultipleObjects(0, nullptr, FALSE, 10, QS_ALLINPUT);
 			logCompositionMode(start);
@@ -411,9 +415,10 @@ public:
 		DXGI_ADAPTER_DESC ad{}; if (adapter) adapter->GetDesc(&ad);
 		HWND scHwnd{};
 		const bool composition = FAILED(sc->GetHwnd(&scHwnd)); // a composition swap chain has no HWND
-		printf("device: %ls\nswapchain: %s, %s%ls, %ux%u px, scale %.2f\n",
+		printf("device: %ls\nswapchain: %s%s, %s%ls, %ux%u px, scale %.2f\n",
 			ad.Description,
 			desc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT ? "R16G16B16A16_FLOAT" : desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM ? "B8G8R8A8_UNORM" : "other format",
+			frame_.srgbTarget ? " drawn via an sRGB-typed texture (no conversion pass)" : "",
 			composition ? "DirectComposition visual, deterrent " : "HWND swap chain",
 			composition ? (frame_.deterrent.empty() ? L"as shipped" : frame_.deterrent.c_str()) : L"",
 			desc.Width, desc.Height, scale_);
@@ -452,6 +457,7 @@ private:
 	float scale_ = 1.0f;
 	int widthPx_{}, heightPx_{};
 	int lastMode_ = -1;
+	unsigned presentTick_ = 0;
 };
 
 Options parseArgs(int argc, wchar_t** argv)
