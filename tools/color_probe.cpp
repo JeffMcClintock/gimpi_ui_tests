@@ -4,18 +4,20 @@
 // adapters and swap chain formats to find where colours drift:
 //
 //   gmpi_ui_color_probe [--monitor N | --monitor \\.\DISPLAYn] [--adapter N] [--8bit] [--warp]
-//                       [--hwnd-swapchain] [--hold ms] [--png out.png] [--csv out.csv]
+//                       [--hwnd-swapchain | --deterrent <mode>] [--hold ms] [--png out.png] [--csv out.csv]
 //
 // --adapter picks the DXGI adapter gmpi_ui renders on (gmpi::directx::setAdapterOverride),
 // --8bit forces the B8G8R8A8 swap chain, --warp the software rasteriser, --hwnd-swapchain
-// bypasses the frame's DirectComposition visual. Not a test: it needs a desktop, and
-// takes the screen for about a second.
+// bypasses the frame's DirectComposition visual and --deterrent swaps the visual's
+// overlay-plane deterrent for another (see ProbeFrame). --hold keeps presenting for that
+// long and logs whether DWM composes the swap chain or puts it on an overlay plane.
+// Not a test: it needs a desktop, and takes the screen for a few seconds.
 
 #define NOMINMAX
 #include <windows.h>
 #include <shellscalingapi.h>
 #include <wincodec.h>
-#include <dxgi1_2.h>
+#include <dxgi1_3.h> // IDXGISwapChainMedia: did DWM compose the swap chain, or give it an overlay plane?
 
 #include <algorithm>
 #include <cmath>
@@ -178,20 +180,103 @@ struct Options
 	bool eightBit{}, warp{}, hwndSwapChain{};
 	int holdMs{};
 	std::wstring png, csv;
+	std::wstring deterrent; // an alternative overlay-plane deterrent to try, see ProbeFrame
 };
 
-// The frame as shipped, or with a plain HWND swap chain instead of the 0.99-opacity
-// DirectComposition visual, to measure what that visual costs.
+// The frame as shipped, with a plain HWND swap chain instead of its DirectComposition
+// visual, or with a composition visual carrying a different overlay-plane deterrent:
+//   none           a plain visual (the control: DWM may promote it to an overlay plane)
+//   opacity:<v>    an effect group with that opacity (the frame shipped 0.99 until 2026-10-21)
+//   3d             an identity 3D matrix transform
+//   rot3d:<deg>    a rotation about the Y axis (the frame ships 0.01)
+//   clip:<radius>  a rounded-rectangle clip with that corner radius, in pixels
 class ProbeFrame final : public gmpi::hosting::DrawingFrame
 {
 public:
 	bool hwndSwapChain{};
+	std::wstring deterrent;
 
 	HRESULT createNativeSwapChain(IDXGIFactory2* factory, ID3D11Device* d3dDevice, DXGI_SWAP_CHAIN_DESC1* desc, IDXGISwapChain1** returnSwapChain) override
 	{
-		if (!hwndSwapChain)
+		if (hwndSwapChain)
+			return factory->CreateSwapChainForHwnd(d3dDevice, getWindowHandle(), desc, nullptr, nullptr, returnSwapChain);
+		if (deterrent.empty())
 			return DrawingFrame::createNativeSwapChain(factory, d3dDevice, desc, returnSwapChain);
-		return factory->CreateSwapChainForHwnd(d3dDevice, getWindowHandle(), desc, nullptr, nullptr, returnSwapChain);
+		return compositionWith(factory, d3dDevice, desc, returnSwapChain);
+	}
+
+private:
+	HRESULT compositionWith(IDXGIFactory2* factory, ID3D11Device* d3dDevice, const DXGI_SWAP_CHAIN_DESC1* desc, IDXGISwapChain1** returnSwapChain)
+	{
+		const auto hwnd = getWindowHandle();
+		RECT client{};
+		GetClientRect(hwnd, &client);
+		DXGI_SWAP_CHAIN_DESC1 compositionDesc{ *desc };
+		compositionDesc.Width = static_cast<UINT>(std::max(1L, client.right - client.left));
+		compositionDesc.Height = static_cast<UINT>(std::max(1L, client.bottom - client.top));
+		compositionDesc.Scaling = DXGI_SCALING_STRETCH;
+
+		gmpi::directx::ComPtr<IDXGISwapChain1> newSwapChain;
+		HRESULT hr = factory->CreateSwapChainForComposition(d3dDevice, &compositionDesc, nullptr, newSwapChain.put());
+		if (FAILED(hr)) return hr;
+
+		compositionVisual = {}; compositionTarget = {}; compositionDevice = {};
+		hr = DCompositionCreateDevice(nullptr, __uuidof(IDCompositionDevice), compositionDevice.put_void());
+		if (SUCCEEDED(hr)) hr = compositionDevice->CreateTargetForHwnd(hwnd, FALSE, compositionTarget.put());
+		if (SUCCEEDED(hr)) hr = compositionDevice->CreateVisual(compositionVisual.put());
+
+		const auto& m = deterrent;
+		const auto value = [&](size_t prefix) { return static_cast<float>(_wtof(m.c_str() + prefix)); };
+		gmpi::directx::ComPtr<IDCompositionEffectGroup> effect;
+		if (SUCCEEDED(hr) && m.rfind(L"opacity:", 0) == 0)
+		{
+			hr = compositionDevice->CreateEffectGroup(effect.put());
+			if (SUCCEEDED(hr)) hr = effect->SetOpacity(value(8));
+		}
+		else if (SUCCEEDED(hr) && m == L"3d")
+		{
+			gmpi::directx::ComPtr<IDCompositionMatrixTransform3D> transform;
+			hr = compositionDevice->CreateEffectGroup(effect.put());
+			if (SUCCEEDED(hr)) hr = compositionDevice->CreateMatrixTransform3D(transform.put());
+			D3DMATRIX identity{};
+			identity._11 = identity._22 = identity._33 = identity._44 = 1.0f;
+			if (SUCCEEDED(hr)) hr = transform->SetMatrix(identity);
+			if (SUCCEEDED(hr)) hr = effect->SetTransform3D(transform.get());
+		}
+		else if (SUCCEEDED(hr) && m.rfind(L"rot3d:", 0) == 0)
+		{
+			gmpi::directx::ComPtr<IDCompositionRotateTransform3D> rotate;
+			hr = compositionDevice->CreateEffectGroup(effect.put());
+			if (SUCCEEDED(hr)) hr = compositionDevice->CreateRotateTransform3D(rotate.put());
+			if (SUCCEEDED(hr)) hr = rotate->SetAxisX(0.0f);
+			if (SUCCEEDED(hr)) hr = rotate->SetAxisY(1.0f);
+			if (SUCCEEDED(hr)) hr = rotate->SetAxisZ(0.0f);
+			if (SUCCEEDED(hr)) hr = rotate->SetAngle(value(6));
+			if (SUCCEEDED(hr)) hr = effect->SetTransform3D(rotate.get());
+		}
+		else if (SUCCEEDED(hr) && m.rfind(L"clip:", 0) == 0)
+		{
+			gmpi::directx::ComPtr<IDCompositionRectangleClip> clip;
+			const float radius = value(5);
+			hr = compositionDevice->CreateRectangleClip(clip.put());
+			if (SUCCEEDED(hr)) hr = clip->SetLeft(0.0f);
+			if (SUCCEEDED(hr)) hr = clip->SetTop(0.0f);
+			if (SUCCEEDED(hr)) hr = clip->SetRight(static_cast<float>(compositionDesc.Width));
+			if (SUCCEEDED(hr)) hr = clip->SetBottom(static_cast<float>(compositionDesc.Height));
+			if (SUCCEEDED(hr)) hr = clip->SetTopLeftRadiusX(radius);
+			if (SUCCEEDED(hr)) hr = clip->SetTopLeftRadiusY(radius);
+			if (SUCCEEDED(hr)) hr = compositionVisual->SetClip(clip.get());
+		}
+		if (SUCCEEDED(hr) && effect) hr = compositionVisual->SetEffect(effect.get());
+		if (SUCCEEDED(hr)) hr = compositionTarget->SetRoot(compositionVisual.get());
+		if (SUCCEEDED(hr)) hr = compositionVisual->SetContent(newSwapChain.get());
+		if (SUCCEEDED(hr)) hr = compositionDevice->Commit();
+		if (FAILED(hr)) return hr;
+
+		compositionWindow = hwnd;
+		*returnSwapChain = newSwapChain.get();
+		(*returnSwapChain)->AddRef();
+		return S_OK;
 	}
 };
 
@@ -269,6 +354,7 @@ public:
 		gmpi::hosting::tempSharedD2DBase::m_disable_gpu = opt.warp;
 		gmpi::directx::setAdapterOverride(opt.adapter);
 		frame_.hwndSwapChain = opt.hwndSwapChain;
+		frame_.deterrent = opt.deterrent;
 
 		frame_.open(hwnd_);
 		if (!frame_.getWindowHandle()) return false;
@@ -285,15 +371,33 @@ public:
 		if (hwnd_) DestroyWindow(hwnd_);
 	}
 
-	void pump(int ms)
+	// Runs the message loop for `ms`. With `present`, the whole frame is redrawn and
+	// presented every tick, which is what gets a swap chain promoted to an overlay
+	// plane; DWM's choice is logged whenever it changes.
+	void pump(int ms, bool present = false)
 	{
-		const auto end = GetTickCount64() + ms;
+		const auto start = GetTickCount64();
 		MSG msg{};
-		while (GetTickCount64() < end)
+		while (GetTickCount64() < start + ms)
 		{
+			if (present)
+				frame_.invalidateRect(nullptr);
 			while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&msg); DispatchMessageW(&msg); }
 			MsgWaitForMultipleObjects(0, nullptr, FALSE, 10, QS_ALLINPUT);
+			logCompositionMode(start);
 		}
+	}
+
+	void logCompositionMode(ULONGLONG start)
+	{
+		if (!frame_.swapChain) return;
+		auto media = frame_.swapChain.as<IDXGISwapChainMedia>();
+		DXGI_FRAME_STATISTICS_MEDIA stats{};
+		if (!media || FAILED(media->GetFrameStatisticsMedia(&stats)) || static_cast<int>(stats.CompositionMode) == lastMode_)
+			return;
+		lastMode_ = static_cast<int>(stats.CompositionMode);
+		static const char* names[]{ "COMPOSED", "OVERLAY", "NONE", "COMPOSITION_FAILURE" };
+		printf("t=%.2fs DWM composition mode -> %s\n", (GetTickCount64() - start) / 1000.0, lastMode_ < 4 ? names[lastMode_] : "?");
 	}
 
 	// What gmpi_ui actually ended up with.
@@ -307,10 +411,11 @@ public:
 		DXGI_ADAPTER_DESC ad{}; if (adapter) adapter->GetDesc(&ad);
 		HWND scHwnd{};
 		const bool composition = FAILED(sc->GetHwnd(&scHwnd)); // a composition swap chain has no HWND
-		printf("device: %ls\nswapchain: %s, %s, %ux%u px, scale %.2f\n",
+		printf("device: %ls\nswapchain: %s, %s%ls, %ux%u px, scale %.2f\n",
 			ad.Description,
 			desc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT ? "R16G16B16A16_FLOAT" : desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM ? "B8G8R8A8_UNORM" : "other format",
-			composition ? "DirectComposition visual (0.99 opacity)" : "HWND swap chain",
+			composition ? "DirectComposition visual, deterrent " : "HWND swap chain",
+			composition ? (frame_.deterrent.empty() ? L"as shipped" : frame_.deterrent.c_str()) : L"",
 			desc.Width, desc.Height, scale_);
 	}
 
@@ -346,6 +451,7 @@ private:
 	HWND hwnd_{};
 	float scale_ = 1.0f;
 	int widthPx_{}, heightPx_{};
+	int lastMode_ = -1;
 };
 
 Options parseArgs(int argc, wchar_t** argv)
@@ -360,6 +466,7 @@ Options parseArgs(int argc, wchar_t** argv)
 		else if (a == L"--8bit") o.eightBit = true;
 		else if (a == L"--warp") o.warp = true;
 		else if (a == L"--hwnd-swapchain") o.hwndSwapChain = true;
+		else if (a == L"--deterrent") o.deterrent = next();
 		else if (a == L"--hold") o.holdMs = _wtoi(next().c_str());
 		else if (a == L"--png") o.png = next();
 		else if (a == L"--csv") o.csv = next();
@@ -393,7 +500,17 @@ int wmain(int argc, wchar_t** argv)
 		window.describe();
 		pixels = window.capture();
 		w = window.width(); h = window.height(); scale = window.scale();
-		if (opt.holdMs > 0) window.pump(opt.holdMs);
+		if (opt.holdMs > 0)
+		{
+			// Present continuously, so DWM gets the chance to promote the swap chain, then see
+			// whether the screen still shows the same pixels.
+			window.pump(opt.holdMs, true);
+			const auto again = window.capture();
+			int worst = 0;
+			for (size_t i = 0; i < pixels.size(); ++i)
+				worst = std::max(worst, std::abs(int(again[i]) - int(pixels[i])));
+			printf("after %d ms of presenting, the capture differs from the first by at most %d code values\n", opt.holdMs, worst);
+		}
 	}
 
 	if (!opt.png.empty())
