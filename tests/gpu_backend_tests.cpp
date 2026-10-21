@@ -125,3 +125,40 @@ TEST_F(DrawingTest, GpuApplyMaskRoundTrips)
     EXPECT_NEAR(centre[2], 1.0f, 0.01f) << "DodgerBlue keeps its blue";
 }
 #endif
+
+#if GMPI_UI_TESTS_BACKEND_GPU
+// A target keeps its pixels across beginDraw/endDraw pairs and never
+// composites a shape twice, even when it is read back mid-frame.
+TEST_F(DrawingTest, GpuRetainsPixelsAndDrawsEachShapeOnce)
+{
+    auto half = g.createSolidColorBrush(Color{ 0.0f, 0.0f, 0.0f, 0.5f });
+    g.fillRectangle(Rect{ 0.0f, 0.0f, 32.0f, 32.0f }, half);
+
+    // Mid-frame read-back (what CachedBlur/applyMask do).
+    auto bitmap = g.getBitmap();
+    float greyBefore;
+    {
+        auto px = bitmap.lockPixels(BitmapLockFlags::Read);
+        greyBefore = pixelAt(px, 16, 16)[0];
+    }
+
+    auto blue = g.createSolidColorBrush(Color{ 0.0f, 0.0f, 1.0f, 1.0f });
+    g.fillRectangle(Rect{ 40.0f, 40.0f, 60.0f, 60.0f }, blue);
+    g.endDraw();
+    drawingActive = false;
+
+    // A second frame that draws nothing over the grey.
+    g.beginDraw();
+    g.fillRectangle(Rect{ 40.0f, 0.0f, 60.0f, 20.0f }, blue);
+    g.endDraw();
+
+    auto px = bitmap.lockPixels(BitmapLockFlags::Read);
+    const auto grey = pixelAt(px, 16, 16);
+    const auto b1 = pixelAt(px, 50, 50);
+    const auto b2 = pixelAt(px, 50, 10);
+    EXPECT_NEAR(greyBefore, 0.5f, 0.01f) << "50% black over white";
+    EXPECT_NEAR(grey[0], 0.5f, 0.01f) << "not darkened by later frames or read-backs";
+    EXPECT_NEAR(b1[2], 1.0f, 0.01f) << "first frame's shape kept";
+    EXPECT_NEAR(b2[2], 1.0f, 0.01f) << "second frame's shape drawn";
+}
+#endif
