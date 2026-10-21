@@ -177,6 +177,7 @@ add_executable(gmpi_ui_tests
     tests/c_projection_calls.c
     ${DRAWING_TEST_CONTEXT_SRC}
     tests/DrawingTestContext_gpu.cpp
+    tests/gpu_backend_tests.cpp
     ${GMPI_UI_SDK}/backends/DirectXGfx.cpp
     ${GMPI_UI_SDK}/experimental/grid.cpp
     ${GMPI_UI_SDK}/experimental/primatives.cpp
