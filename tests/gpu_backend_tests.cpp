@@ -8,8 +8,11 @@
 
 #include "DrawingTestFixture.h"
 #include "helpers/BitmapMask.h"
+#include "backends/GpuGfx.h"
 
 #include <gtest/gtest.h>
+
+#include <cstdio>
 
 using namespace gmpi::drawing;
 
@@ -160,5 +163,60 @@ TEST_F(DrawingTest, GpuRetainsPixelsAndDrawsEachShapeOnce)
     EXPECT_NEAR(grey[0], 0.5f, 0.01f) << "not darkened by later frames or read-backs";
     EXPECT_NEAR(b1[2], 1.0f, 0.01f) << "first frame's shape kept";
     EXPECT_NEAR(b2[2], 1.0f, 0.01f) << "second frame's shape drawn";
+}
+#endif
+
+#if GMPI_UI_TESTS_BACKEND_GPU
+// Diagnostic: runs after the drawing tests in this process and reports which
+// stage loses a channel once the "blue channel zeroed" state has set in.
+TEST_F(DrawingTest, GpuChannelProbe)
+{
+    auto probe = [&](const char* what, gmpi::drawing::Bitmap bitmap) {
+        auto px = bitmap.lockPixels(BitmapLockFlags::Read);
+        const auto p = pixelAt(px, 32, 32);
+        std::printf("[probe] %-28s r %.3f g %.3f b %.3f a %.3f\n", what, p[0], p[1], p[2], p[3]);
+        return p;
+    };
+
+    // (a) the fixture's white clear, as is
+    g.endDraw();
+    drawingActive = false;
+    const auto a = probe("clear white", g.getBitmap());
+
+    // (b) a solid white fill on a fresh target (GPU path)
+    auto t1 = drawingContext.createCpuRenderTarget({ kWidth, kHeight }, kRenderFlags);
+    t1.beginDraw();
+    t1.clear(Colors::Black);
+    t1.fillRectangle(Rect{ 0, 0, 64, 64 }, t1.createSolidColorBrush(Colors::White));
+    t1.endDraw();
+    const auto b = probe("gpu fill white", t1.getBitmap());
+
+    // (c) a white image through the fallback upload
+    auto t2 = drawingContext.createCpuRenderTarget({ kWidth, kHeight }, kRenderFlags);
+    auto src = drawingContext.factory().createCpuRenderTarget({ 8, 8 }, (int32_t)BitmapRenderTargetFlags::CpuReadable | (int32_t)BitmapRenderTargetFlags::SRGBPixels);
+    src.beginDraw();
+    src.clear(Colors::White);
+    src.endDraw();
+    t2.beginDraw();
+    t2.clear(Colors::Black);
+    t2.drawBitmap(src.getBitmap(), Rect{ 0, 0, 64, 64 }, Rect{ 0, 0, 8, 8 });
+    t2.endDraw();
+    const auto c = probe("fallback image white", t2.getBitmap());
+
+    // (d) the fork directly: a fresh windowless canvas, white fill, screenshot
+    {
+        visage::Canvas canvas;
+        canvas.setWindowless(16, 16);
+        canvas.setClampBounds(0, 0, 16, 16);
+        canvas.setBlendMode(visage::BlendMode::Opaque);
+        canvas.setColor(visage::Color(1.0f, 1.0f, 1.0f, 1.0f));
+        canvas.fill(0, 0, 16, 16);
+        canvas.submit();
+        visage::Color s = canvas.takeScreenshot().sample(8, 8);
+        std::printf("[probe] %-28s r %d g %d b %d\n", "fork canvas white", s.hexRed(), s.hexGreen(), s.hexBlue());
+    }
+    EXPECT_NEAR(a[2], 1.0f, 0.02f);
+    EXPECT_NEAR(b[2], 1.0f, 0.02f);
+    EXPECT_NEAR(c[2], 1.0f, 0.02f);
 }
 #endif
