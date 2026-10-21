@@ -257,6 +257,19 @@ protected:
 
         if (!refBitmap)
         {
+            // A reference that EXISTS but will not load is a broken backend
+            // (loadImageU returning NoSupport, a bad decoder), not a new test.
+            // Writing the candidate over it would replace the D2D truth with
+            // whatever this backend drew - which is exactly what happened the
+            // first time the GPU backend ran, 13 references at once.
+            if (std::filesystem::exists(refPath))
+            {
+                savePng(actualPath, bitmap);
+                return ::testing::AssertionFailure()
+                    << "Reference exists but could not be loaded through this backend's loadImageU:\n  "
+                    << refPath.string()
+                    << "\nActual image written to: " << actualPath.string();
+            }
             savePng(refPath, bitmap);
             return ::testing::AssertionFailure()
                 << "[MISSING REFERENCE] Wrote candidate image to:\n  "

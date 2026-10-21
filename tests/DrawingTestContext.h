@@ -27,7 +27,17 @@
 
 // Resolved once, so the implementation files cannot disagree about which of
 // them is the live one.
-#if defined(_WIN32)
+#ifndef GMPI_UI_TESTS_GPU_BACKEND
+#define GMPI_UI_TESTS_GPU_BACKEND 0
+#endif
+
+// The bgfx-based GPU backend (backends/GpuGfx.h) is an opt-in on every
+// platform and takes precedence over the others when selected.
+#define GMPI_UI_TESTS_BACKEND_GPU GMPI_UI_TESTS_GPU_BACKEND
+
+#if GMPI_UI_TESTS_BACKEND_GPU
+    #define GMPI_UI_TESTS_BACKEND_CPU 0
+#elif defined(_WIN32)
     #define GMPI_UI_TESTS_BACKEND_CPU 0                        // always Direct2D: it defines the references
 #elif defined(__APPLE__)
     #define GMPI_UI_TESTS_BACKEND_CPU (!GMPI_UI_TESTS_NATIVE_BACKEND)
