@@ -12,7 +12,9 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <cstdio>
+#include <vector>
 
 using namespace gmpi::drawing;
 
@@ -242,4 +244,105 @@ TEST_F(DrawingTest, GpuClearUnderOffsetClip)
     EXPECT_NEAR(outsideLeft[0], 1.0f, 0.01f) << "white (untouched) left of the clip";
     EXPECT_NEAR(outsideTop[0], 1.0f, 0.01f) << "white (untouched) above the clip";
 }
+#endif
+
+#if GMPI_UI_TESTS_BACKEND_GPU
+
+// The Freq Analyser's graph: a 1-pixel solid stroke along a 400-point
+// polyline, drawn on a dark background. Seen in the editor: faint lines of
+// the stroke colour fanning out from the polyline's first point across the
+// empty area above the curve. Every pixel more than three pixels from the
+// polyline must stay exactly background.
+TEST_F(DrawingTest, GpuStrokedGraphLeavesTheBackgroundClean)
+{
+    g.endDraw();
+    drawingActive = false;
+
+    // The fixture's target is 64x64; a graph needs room for long slivers.
+    auto rt = drawingContext.createCpuRenderTarget({ 256u, 128u }, kRenderFlags);
+    rt.beginDraw();
+    const Color background{ 0.05f, 0.05f, 0.08f, 1.0f };
+    rt.clear(background);
+
+    auto graphY = [](float x) {
+        float y = 100.0f - 0.1f * x;
+        y -= 80.0f * std::exp(-((x - 100.0f) * (x - 100.0f)) / 18.0f);
+        y -= 60.0f * std::exp(-((x - 130.0f) * (x - 130.0f)) / 8.0f);
+        y -= 50.0f * std::exp(-((x - 150.0f) * (x - 150.0f)) / 5.0f);
+        y -= 40.0f * std::exp(-((x - 165.0f) * (x - 165.0f)) / 3.0f);
+        return y;
+    };
+
+    std::vector<Point> pts;
+    for (float x = 10.0f; x < 190.0f; x += 0.45f)
+        pts.push_back({ x, graphY(x) });
+
+    auto geometry = rt.getFactory().createPathGeometry();
+    {
+        auto sink = geometry.open();
+        sink.beginFigure(pts.front(), FigureBegin::Hollow);
+        for (size_t i = 1; i < pts.size(); ++i)
+            sink.addLine(pts[i]);
+        sink.endFigure(FigureEnd::Open);
+        sink.close();
+    }
+    auto brush = rt.createSolidColorBrush(Color{ 0.4f, 0.7f, 0.8f, 1.0f });
+    rt.drawGeometry(geometry, brush, 1.0f);
+    rt.endDraw();
+
+    auto distanceToPolyline = [&](float px, float py) {
+        float best = 1e9f;
+        for (size_t i = 1; i < pts.size(); ++i)
+        {
+            const float ax = pts[i - 1].x, ay = pts[i - 1].y, bx = pts[i].x, by = pts[i].y;
+            const float dx = bx - ax, dy = by - ay;
+            const float len2 = dx * dx + dy * dy;
+            float t = len2 > 0.0f ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0.0f;
+            t = (std::max)(0.0f, (std::min)(1.0f, t));
+            const float ex = ax + t * dx - px, ey = ay + t * dy - py;
+            best = (std::min)(best, ex * ex + ey * ey);
+        }
+        return std::sqrt(best);
+    };
+
+    auto px = rt.getBitmap().lockPixels(BitmapLockFlags::Read);
+    float worst = 0.0f;
+    uint32_t worstX = 0, worstY = 0;
+    for (uint32_t y = 0; y < 120; ++y)
+    {
+        for (uint32_t x = 0; x < 200; ++x)
+        {
+            if (distanceToPolyline(x + 0.5f, y + 0.5f) < 3.0f)
+                continue;
+            const auto c = pixelAt(px, x, y);
+            // premultiplied linear: green is background 0.05 unless the stroke leaked
+            const float leak = std::fabs(c[1] - background.g);
+            if (leak > worst)
+            {
+                worst = leak;
+                worstX = x;
+                worstY = y;
+            }
+        }
+    }
+    if (worst >= 0.0005f)
+    {
+        // Diagnostic: the leak, amplified 50x, as an 8-bit PGM.
+        if (FILE* f = std::fopen("/tmp/claude-1000/-home-jef-SE/4a109b28-eaee-4758-9548-aef5c3153c55/scratchpad/stroke_leak.pgm", "wb"))
+        {
+            std::fprintf(f, "P5\n256 128\n255\n");
+            for (uint32_t y = 0; y < 128; ++y)
+                for (uint32_t x = 0; x < 256; ++x)
+                {
+                    const auto c = pixelAt(px, x, y);
+                    const float v = (std::min)(1.0f, std::fabs(c[1] - background.g) * 50.0f);
+                    std::fputc(int(v * 255.0f), f);
+                }
+            std::fclose(f);
+        }
+    }
+    EXPECT_LT(worst, 0.0005f) << "stroke colour leaked onto the background at (" << worstX << "," << worstY
+                              << "): green " << worst << " above background";
+}
+
 #endif
