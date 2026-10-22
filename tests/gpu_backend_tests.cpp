@@ -220,3 +220,26 @@ TEST_F(DrawingTest, GpuChannelProbe)
     EXPECT_NEAR(c[2], 1.0f, 0.02f);
 }
 #endif
+
+#if GMPI_UI_TESTS_BACKEND_GPU
+// clear() under a clip that does not start at the origin fills exactly the
+// clip. The GPU backend once filled a rect of the clip's SIZE at the origin
+// instead (the editor's right-hand panel at x = 1010 stayed unpainted).
+TEST_F(DrawingTest, GpuClearUnderOffsetClip)
+{
+    g.pushAxisAlignedClip(Rect{ 40.0f, 24.0f, 64.0f, 64.0f });
+    g.clear(Color{ 0.0f, 0.0f, 1.0f, 1.0f });
+    g.popAxisAlignedClip();
+    g.endDraw();
+    drawingActive = false;
+
+    auto px = g.getBitmap().lockPixels(BitmapLockFlags::Read);
+    const auto inside = pixelAt(px, 50, 40);
+    const auto outsideLeft = pixelAt(px, 20, 40);
+    const auto outsideTop = pixelAt(px, 50, 10);
+    EXPECT_NEAR(inside[2], 1.0f, 0.01f) << "blue inside the clip";
+    EXPECT_NEAR(inside[0], 0.0f, 0.01f);
+    EXPECT_NEAR(outsideLeft[0], 1.0f, 0.01f) << "white (untouched) left of the clip";
+    EXPECT_NEAR(outsideTop[0], 1.0f, 0.01f) << "white (untouched) above the clip";
+}
+#endif
