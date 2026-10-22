@@ -35,7 +35,7 @@ std::array<float, 4> pixelAt(BitmapPixels& px, uint32_t x, uint32_t y)
 TEST_F(DrawingTest, GpuLockReadsBackWhatWasDrawn)
 {
     auto brush = g.createSolidColorBrush(Color{ 0.0f, 0.0f, 1.0f, 1.0f });
-    g.fillRectangle(Rect{ 8.0f, 8.0f, 24.0f, 24.0f }, brush);
+    g.fillRectangle(gmpi::drawing::Rect{ 8.0f, 8.0f, 24.0f, 24.0f }, brush);
     g.endDraw();
     drawingActive = false;
 
@@ -88,8 +88,8 @@ TEST_F(DrawingTest, GpuWriteLockRoundTrips)
     auto other = drawingContext.createCpuRenderTarget({ kWidth, kHeight }, kRenderFlags);
     other.beginDraw();
     other.clear(Colors::Black);
-    other.drawBitmap(bitmap, Rect{ 0.0f, 0.0f, float(kWidth), float(kHeight) },
-                     Rect{ 0.0f, 0.0f, float(kWidth), float(kHeight) });
+    other.drawBitmap(bitmap, gmpi::drawing::Rect{ 0.0f, 0.0f, float(kWidth), float(kHeight) },
+                     gmpi::drawing::Rect{ 0.0f, 0.0f, float(kWidth), float(kHeight) });
     other.endDraw();
     auto px = other.getBitmap().lockPixels(BitmapLockFlags::Read);
     const auto copied = pixelAt(px, 10, 5);
@@ -138,7 +138,7 @@ TEST_F(DrawingTest, GpuApplyMaskRoundTrips)
 TEST_F(DrawingTest, GpuRetainsPixelsAndDrawsEachShapeOnce)
 {
     auto half = g.createSolidColorBrush(Color{ 0.0f, 0.0f, 0.0f, 0.5f });
-    g.fillRectangle(Rect{ 0.0f, 0.0f, 32.0f, 32.0f }, half);
+    g.fillRectangle(gmpi::drawing::Rect{ 0.0f, 0.0f, 32.0f, 32.0f }, half);
 
     // Mid-frame read-back (what CachedBlur/applyMask do).
     auto bitmap = g.getBitmap();
@@ -149,13 +149,13 @@ TEST_F(DrawingTest, GpuRetainsPixelsAndDrawsEachShapeOnce)
     }
 
     auto blue = g.createSolidColorBrush(Color{ 0.0f, 0.0f, 1.0f, 1.0f });
-    g.fillRectangle(Rect{ 40.0f, 40.0f, 60.0f, 60.0f }, blue);
+    g.fillRectangle(gmpi::drawing::Rect{ 40.0f, 40.0f, 60.0f, 60.0f }, blue);
     g.endDraw();
     drawingActive = false;
 
     // A second frame that draws nothing over the grey.
     g.beginDraw();
-    g.fillRectangle(Rect{ 40.0f, 0.0f, 60.0f, 20.0f }, blue);
+    g.fillRectangle(gmpi::drawing::Rect{ 40.0f, 0.0f, 60.0f, 20.0f }, blue);
     g.endDraw();
 
     auto px = bitmap.lockPixels(BitmapLockFlags::Read);
@@ -190,7 +190,7 @@ TEST_F(DrawingTest, GpuChannelProbe)
     auto t1 = drawingContext.createCpuRenderTarget({ kWidth, kHeight }, kRenderFlags);
     t1.beginDraw();
     t1.clear(Colors::Black);
-    t1.fillRectangle(Rect{ 0, 0, 64, 64 }, t1.createSolidColorBrush(Colors::White));
+    t1.fillRectangle(gmpi::drawing::Rect{ 0, 0, 64, 64 }, t1.createSolidColorBrush(Colors::White));
     t1.endDraw();
     const auto b = probe("gpu fill white", t1.getBitmap());
 
@@ -202,7 +202,7 @@ TEST_F(DrawingTest, GpuChannelProbe)
     src.endDraw();
     t2.beginDraw();
     t2.clear(Colors::Black);
-    t2.drawBitmap(src.getBitmap(), Rect{ 0, 0, 64, 64 }, Rect{ 0, 0, 8, 8 });
+    t2.drawBitmap(src.getBitmap(), gmpi::drawing::Rect{ 0, 0, 64, 64 }, gmpi::drawing::Rect{ 0, 0, 8, 8 });
     t2.endDraw();
     const auto c = probe("fallback image white", t2.getBitmap());
 
@@ -230,7 +230,7 @@ TEST_F(DrawingTest, GpuChannelProbe)
 // instead (the editor's right-hand panel at x = 1010 stayed unpainted).
 TEST_F(DrawingTest, GpuClearUnderOffsetClip)
 {
-    g.pushAxisAlignedClip(Rect{ 40.0f, 24.0f, 64.0f, 64.0f });
+    g.pushAxisAlignedClip(gmpi::drawing::Rect{ 40.0f, 24.0f, 64.0f, 64.0f });
     g.clear(Color{ 0.0f, 0.0f, 1.0f, 1.0f });
     g.popAxisAlignedClip();
     g.endDraw();
@@ -274,7 +274,7 @@ TEST_F(DrawingTest, GpuStrokedGraphLeavesTheBackgroundClean)
         return y;
     };
 
-    std::vector<Point> pts;
+    std::vector<gmpi::drawing::Point> pts;
     for (float x = 10.0f; x < 190.0f; x += 0.45f)
         pts.push_back({ x, graphY(x) });
 
@@ -529,7 +529,7 @@ TEST_F(DrawingTest, GpuBitmapRedrawFollowsWriteLock)
     auto target = drawingContext.createCpuRenderTarget({ 32, 32 }, 0);
     target.beginDraw();
     target.clear(Colors::Black);
-    target.drawBitmap(bitmap, Point{ 4.0f, 4.0f }, Rect{ 0.0f, 0.0f, 8.0f, 8.0f });
+    target.drawBitmap(bitmap, gmpi::drawing::Point{ 4.0f, 4.0f }, gmpi::drawing::Rect{ 0.0f, 0.0f, 8.0f, 8.0f });
     target.endDraw();
     {
         auto px = target.getBitmap().lockPixels(BitmapLockFlags::Read);
@@ -556,7 +556,7 @@ TEST_F(DrawingTest, GpuBitmapRedrawFollowsWriteLock)
     }
 
     target.beginDraw();
-    target.drawBitmap(bitmap, Point{ 4.0f, 4.0f }, Rect{ 0.0f, 0.0f, 8.0f, 8.0f });
+    target.drawBitmap(bitmap, gmpi::drawing::Point{ 4.0f, 4.0f }, gmpi::drawing::Rect{ 0.0f, 0.0f, 8.0f, 8.0f });
     target.endDraw();
     {
         auto px = target.getBitmap().lockPixels(BitmapLockFlags::Read);
@@ -589,7 +589,7 @@ TEST_F(DrawingTest, GpuStretchedBitmapMatchesCpu)
     auto bitmap = source.getBitmap();
 
     const auto m = gpuVersusCpu(drawingContext, 64, 48, [&](gmpi::drawing::Graphics& rt) {
-        rt.drawBitmap(bitmap, Rect{ 5.0f, 4.0f, 57.0f, 44.0f }, Rect{ 0.0f, 0.0f, 6.0f, 6.0f }, 0.75f,
+        rt.drawBitmap(bitmap, gmpi::drawing::Rect{ 5.0f, 4.0f, 57.0f, 44.0f }, gmpi::drawing::Rect{ 0.0f, 0.0f, 6.0f, 6.0f }, 0.75f,
                       BitmapInterpolationMode::Linear);
     }, "stretch");
     EXPECT_LT(m.worst, 0.01f) << "worst at (" << m.x << "," << m.y << ")";

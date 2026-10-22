@@ -268,6 +268,11 @@ if(GMPI_UI_TESTS_GPU_BACKEND)
     set(VISAGE_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(VISAGE_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     set(VISAGE_ENABLE_WIDGETS OFF CACHE BOOL "" FORCE)
+    # The fork enables OBJC/OBJCXX from its own project(); CMake only honours
+    # enable_language at the top level, so the Metal path needs it here.
+    if(APPLE)
+        enable_language(OBJC OBJCXX)
+    endif()
     add_subdirectory(${GMPI_GPU_GRAPHICS_FOLDER} gpu_graphics EXCLUDE_FROM_ALL)
     target_link_libraries(gmpi_ui_tests PRIVATE visage)
 endif()

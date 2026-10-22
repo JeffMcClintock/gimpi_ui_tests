@@ -7,7 +7,7 @@
 
 #include "DrawingTestContext.h" // decides which implementation is live
 
-#if !GMPI_UI_TESTS_BACKEND_CPU
+#if !GMPI_UI_TESTS_BACKEND_CPU && !GMPI_UI_TESTS_BACKEND_GPU
 
 #import <Cocoa/Cocoa.h>
 #import "backends/CocoaGfx.h"
@@ -36,4 +36,4 @@ gmpi::drawing::BitmapRenderTarget DrawingTestContext::createCpuRenderTarget(gmpi
     return impl_->factory.createCpuRenderTarget(size, flags, dpi);
 }
 
-#endif // !GMPI_UI_TESTS_BACKEND_CPU
+#endif // !GMPI_UI_TESTS_BACKEND_CPU && !GMPI_UI_TESTS_BACKEND_GPU
