@@ -208,14 +208,14 @@ TEST_F(DrawingTest, GpuChannelProbe)
 
     // (d) the fork directly: a fresh windowless canvas, white fill, screenshot
     {
-        visage::Canvas canvas;
+        gmpi::gpu::Canvas canvas;
         canvas.setWindowless(16, 16);
         canvas.setClampBounds(0, 0, 16, 16);
-        canvas.setBlendMode(visage::BlendMode::Opaque);
-        canvas.setColor(visage::Color(1.0f, 1.0f, 1.0f, 1.0f));
+        canvas.setBlendMode(gmpi::gpu::BlendMode::Opaque);
+        canvas.setColor(gmpi::gpu::Color(1.0f, 1.0f, 1.0f, 1.0f));
         canvas.fill(0, 0, 16, 16);
         canvas.submit();
-        visage::Color s = canvas.takeScreenshot().sample(8, 8);
+        gmpi::gpu::Color s = canvas.takeScreenshot().sample(8, 8);
         std::printf("[probe] %-28s r %d g %d b %d\n", "fork canvas white", s.hexRed(), s.hexGreen(), s.hexBlue());
     }
     EXPECT_NEAR(a[2], 1.0f, 0.02f);

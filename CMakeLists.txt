@@ -132,14 +132,12 @@ option(GMPI_UI_TESTS_NATIVE_BACKEND
     "Render the drawing tests through each platform's native backend (Cocoa on macOS) instead of the shared CPU backend"
     OFF)
 
-# The GPU backend (backends/GpuGfx.h over the gmpi fork of Visage: bgfx, so
-# D3D11 / Metal / Vulkan). Opt-in on every platform; headless, but it needs a
-# Vulkan ICD on Linux (lavapipe will do). GMPI_GPU_GRAPHICS_FOLDER points at a
-# checkout of https://github.com/JeffMcClintock/visage (branch gmpi).
+# The GPU backend (backends/GpuGfx.h over gmpi_ui's renderer in
+# backends/gpu: bgfx, so D3D11 / Metal / Vulkan). Opt-in on every platform;
+# headless, but it needs a Vulkan ICD on Linux (lavapipe will do).
 option(GMPI_UI_TESTS_GPU_BACKEND
     "Render the drawing tests through the bgfx-based GPU backend (backends/GpuGfx.h)"
     OFF)
-set(GMPI_GPU_GRAPHICS_FOLDER "" CACHE PATH "Checkout of the gmpi graphics fork (JeffMcClintock/visage) for the GPU backend")
 
 if(APPLE)
     # BOTH are compiled; the macro decides which one has a body, so flipping it
@@ -178,6 +176,7 @@ add_executable(gmpi_ui_tests
     ${DRAWING_TEST_CONTEXT_SRC}
     tests/DrawingTestContext_gpu.cpp
     tests/gpu_backend_tests.cpp
+    tests/gpu_renderer_tests.cpp
     ${GMPI_UI_SDK}/backends/DirectXGfx.cpp
     ${GMPI_UI_SDK}/experimental/grid.cpp
     ${GMPI_UI_SDK}/experimental/primatives.cpp
@@ -262,19 +261,8 @@ else()
 endif()
 
 if(GMPI_UI_TESTS_GPU_BACKEND)
-    if(NOT EXISTS "${GMPI_GPU_GRAPHICS_FOLDER}/visage_graphics/canvas.h")
-        message(FATAL_ERROR "GMPI_UI_TESTS_GPU_BACKEND needs GMPI_GPU_GRAPHICS_FOLDER to point at the gmpi graphics fork")
-    endif()
-    set(VISAGE_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-    set(VISAGE_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-    set(VISAGE_ENABLE_WIDGETS OFF CACHE BOOL "" FORCE)
-    # The fork enables OBJC/OBJCXX from its own project(); CMake only honours
-    # enable_language at the top level, so the Metal path needs it here.
-    if(APPLE)
-        enable_language(OBJC OBJCXX)
-    endif()
-    add_subdirectory(${GMPI_GPU_GRAPHICS_FOLDER} gpu_graphics EXCLUDE_FROM_ALL)
-    target_link_libraries(gmpi_ui_tests PRIVATE visage)
+    include(${GMPI_UI_SDK}/backends/gpu/gmpi_gpu.cmake)
+    target_link_libraries(gmpi_ui_tests PRIVATE gmpi_gpu)
 endif()
 
 enable_testing()
