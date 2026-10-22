@@ -14,6 +14,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <string>
 #include <vector>
 
 using namespace gmpi::drawing;
@@ -343,6 +344,256 @@ TEST_F(DrawingTest, GpuStrokedGraphLeavesTheBackgroundClean)
     }
     EXPECT_LT(worst, 0.0005f) << "stroke colour leaked onto the background at (" << worstX << "," << worstY
                               << "): green " << worst << " above background";
+}
+
+#endif
+
+#if GMPI_UI_TESTS_BACKEND_GPU
+
+// The GPU paints gradients and bitmaps itself now; cpugfx (D2D-exact by its
+// own suite) is the oracle. Both targets are the same fp16 format, so the
+// comparison is on the premultiplied linear values.
+namespace
+{
+
+gmpi::drawing::BitmapRenderTarget cpuOracleTarget(DrawingTestContext& ctx, uint32_t w, uint32_t h)
+{
+    auto* gpuFactory = dynamic_cast<gmpi::gpugfx::Factory*>(gmpi::drawing::AccessPtr::get(ctx.factory()));
+    EXPECT_NE(gpuFactory, nullptr);
+    gmpi::drawing::api::IBitmapRenderTarget* native{};
+    gpuFactory->cpu.createCpuRenderTarget({ w, h }, 0, &native, 96.0f);
+    gmpi::drawing::BitmapRenderTarget rt;
+    *gmpi::drawing::AccessPtr::put(rt) = native; // takes the reference
+    return rt;
+}
+
+// Two same-sized locked targets compared channel by channel. `worst` is
+// the largest difference over pixels that are not outliers; `outliers` the
+// count of pixels differing by more than kOutlier. A few outliers are
+// expected where the two rasterisers legitimately disagree by a whole
+// pixel: a wrapped gradient's seam lands on one side or the other of a
+// pixel centre, and a shape corner's SDF coverage is not its area.
+struct Mismatch { float worst{}; uint32_t x{}, y{}; uint32_t outliers{}; uint32_t pixels{}; };
+constexpr float kOutlier = 0.02f;
+Mismatch compareTargets(gmpi::drawing::BitmapRenderTarget& a, gmpi::drawing::BitmapRenderTarget& b, uint32_t w, uint32_t h)
+{
+    auto pa = a.getBitmap().lockPixels(BitmapLockFlags::Read);
+    auto pb = b.getBitmap().lockPixels(BitmapLockFlags::Read);
+    Mismatch m;
+    m.pixels = w * h;
+    for (uint32_t y = 0; y < h; ++y)
+        for (uint32_t x = 0; x < w; ++x)
+        {
+            const auto ca = pixelAt(pa, x, y);
+            const auto cb = pixelAt(pb, x, y);
+            float d = 0.0f;
+            for (int c = 0; c < 4; ++c)
+                d = (std::max)(d, std::fabs(ca[c] - cb[c]));
+            if (d > kOutlier)
+                ++m.outliers;
+            else if (d > m.worst)
+                m = { d, x, y, m.outliers, m.pixels };
+        }
+    return m;
+}
+
+// Diagnostic: a locked target as an 8-bit PPM (linear values, clamped).
+void dumpPpm(const char* name, gmpi::drawing::BitmapRenderTarget& rt, uint32_t w, uint32_t h)
+{
+    std::string path = std::string("/tmp/claude-1000/-home-jef-SE/4a109b28-eaee-4758-9548-aef5c3153c55/scratchpad/oracle_") + name + ".ppm";
+    FILE* f = std::fopen(path.c_str(), "wb");
+    if (!f)
+        return;
+    auto px = rt.getBitmap().lockPixels(BitmapLockFlags::Read);
+    std::fprintf(f, "P6\n%u %u\n255\n", w, h);
+    for (uint32_t y = 0; y < h; ++y)
+        for (uint32_t x = 0; x < w; ++x)
+        {
+            const auto c = pixelAt(px, x, y);
+            for (int i = 0; i < 3; ++i)
+                std::fputc(int((std::min)(1.0f, (std::max)(0.0f, c[i])) * 255.0f + 0.5f), f);
+        }
+    std::fclose(f);
+}
+
+template<typename Draw>
+Mismatch gpuVersusCpu(DrawingTestContext& ctx, uint32_t w, uint32_t h, Draw draw, const char* dumpName = nullptr)
+{
+    auto gpu = ctx.createCpuRenderTarget({ w, h }, 0);
+    auto cpu = cpuOracleTarget(ctx, w, h);
+    for (auto* rt : { &gpu, &cpu })
+    {
+        rt->beginDraw();
+        rt->clear(Color{ 0.1f, 0.1f, 0.1f, 1.0f });
+        draw(*rt);
+        rt->endDraw();
+    }
+    const auto m = compareTargets(gpu, cpu, w, h);
+    if (dumpName && (m.worst >= 0.01f || m.outliers > 0))
+    {
+        dumpPpm((std::string(dumpName) + "_gpu").c_str(), gpu, w, h);
+        dumpPpm((std::string(dumpName) + "_cpu").c_str(), cpu, w, h);
+        // and the difference, x20
+        std::string path = std::string("/tmp/claude-1000/-home-jef-SE/4a109b28-eaee-4758-9548-aef5c3153c55/scratchpad/oracle_") + dumpName + "_diff.ppm";
+        if (FILE* f = std::fopen(path.c_str(), "wb"))
+        {
+            auto pa = gpu.getBitmap().lockPixels(BitmapLockFlags::Read);
+            auto pb = cpu.getBitmap().lockPixels(BitmapLockFlags::Read);
+            std::fprintf(f, "P6\n%u %u\n255\n", w, h);
+            for (uint32_t y = 0; y < h; ++y)
+                for (uint32_t x = 0; x < w; ++x)
+                {
+                    const auto ca = pixelAt(pa, x, y);
+                    const auto cb = pixelAt(pb, x, y);
+                    for (int i = 0; i < 3; ++i)
+                        std::fputc(int((std::min)(1.0f, std::fabs(ca[i] - cb[i]) * 20.0f) * 255.0f + 0.5f), f);
+                }
+            std::fclose(f);
+        }
+    }
+    return m;
+}
+
+} // namespace
+
+// A three-stop gradient whose axis spans a third of the rectangle, under
+// each extend mode: the GPU strip is a 512-entry lookup table, so a few
+// thousandths is the expected quantisation.
+TEST_F(DrawingTest, GpuGradientExtendModesMatchCpu)
+{
+    g.endDraw();
+    drawingActive = false;
+
+    for (auto mode : { ExtendMode::Clamp, ExtendMode::Wrap, ExtendMode::Mirror })
+    {
+        const auto m = gpuVersusCpu(drawingContext, 96, 48, [&](gmpi::drawing::Graphics& rt) {
+            const Gradientstop stops[] = { { 0.0f, Colors::Red }, { 0.4f, Colors::Lime }, { 1.0f, Color{ 0.0f, 0.0f, 1.0f, 0.5f } } };
+            auto collection = rt.createGradientstopCollection(stops, mode);
+            auto brush = rt.createLinearGradientBrush(collection, { 8.0f, 0.0f }, { 40.0f, 10.0f });
+            rt.fillRectangle({ 0.0f, 0.0f, 96.0f, 48.0f }, brush);
+        }, mode == ExtendMode::Wrap ? "wrap" : mode == ExtendMode::Mirror ? "mirror" : "clamp");
+        EXPECT_LT(m.worst, 0.01f) << "extend mode " << int(mode) << " worst at (" << m.x << "," << m.y << ")";
+        EXPECT_LE(m.outliers * 50, m.pixels) << "extend mode " << int(mode) << ": " << m.outliers << " outlier pixels (a seam is ~1%)";
+    }
+}
+
+// A radial gradient with an off-centre origin, unequal radii, a brush
+// transform and a non-uniform context transform: everything the ellipse
+// maths has to get right.
+TEST_F(DrawingTest, GpuRadialGradientMatchesCpu)
+{
+    g.endDraw();
+    drawingActive = false;
+
+    const auto m = gpuVersusCpu(drawingContext, 96, 64, [&](gmpi::drawing::Graphics& rt) {
+        const Gradientstop stops[] = { { 0.0f, Colors::Yellow }, { 0.6f, Colors::DarkBlue }, { 1.0f, Colors::White } };
+        auto collection = rt.createGradientstopCollection(stops, ExtendMode::Clamp);
+        RadialGradientBrushProperties props{};
+        props.center = { 30.0f, 20.0f };
+        props.gradientOriginOffset = { 8.0f, -5.0f };
+        props.radiusX = 24.0f;
+        props.radiusY = 14.0f;
+        BrushProperties bp{};
+        bp.opacity = 0.8f;
+        bp.transform = makeRotation(0.3f) * makeTranslation(4.0f, 2.0f);
+        auto brush = rt.createRadialGradientBrush(props, bp, collection);
+        const auto t = makeScale(1.4f, 0.9f) * makeTranslation(3.0f, 5.0f);
+        rt.setTransform(t);
+        // 60 x 60 lands on whole device pixels (87, 59): the fill's own edge
+        // coverage (SDF vs area) is not what this test is about.
+        rt.fillRectangle({ 0.0f, 0.0f, 60.0f, 60.0f }, brush);
+        rt.setTransform(Matrix3x2{});
+    }, "radial");
+    EXPECT_LT(m.worst, 0.01f) << "worst at (" << m.x << "," << m.y << ")";
+    EXPECT_LE(m.outliers, 4u) << "outlier pixels (the fill's corners may differ)";
+}
+
+// A cached atlas image must follow the bitmap: draw, modify through a write
+// lock, draw again, and the second draw shows the new pixels.
+TEST_F(DrawingTest, GpuBitmapRedrawFollowsWriteLock)
+{
+    g.endDraw();
+    drawingActive = false;
+
+    auto* gpuFactory = dynamic_cast<gmpi::gpugfx::Factory*>(gmpi::drawing::AccessPtr::get(drawingContext.factory()));
+    ASSERT_NE(gpuFactory, nullptr);
+    gmpi::drawing::api::IBitmapRenderTarget* native{};
+    gpuFactory->cpu.createCpuRenderTarget({ 8, 8 }, 0, &native, 96.0f);
+    gmpi::drawing::BitmapRenderTarget source;
+    *gmpi::drawing::AccessPtr::put(source) = native;
+    source.beginDraw();
+    source.clear(Colors::Red);
+    source.endDraw();
+    auto bitmap = source.getBitmap();
+
+    auto target = drawingContext.createCpuRenderTarget({ 32, 32 }, 0);
+    target.beginDraw();
+    target.clear(Colors::Black);
+    target.drawBitmap(bitmap, Point{ 4.0f, 4.0f }, Rect{ 0.0f, 0.0f, 8.0f, 8.0f });
+    target.endDraw();
+    {
+        auto px = target.getBitmap().lockPixels(BitmapLockFlags::Read);
+        const auto c = pixelAt(px, 8, 8);
+        EXPECT_NEAR(c[0], 1.0f, 0.01f);
+        EXPECT_NEAR(c[2], 0.0f, 0.01f);
+    }
+
+    // Paint it blue through a write lock (fp16 premultiplied).
+    {
+        auto px = bitmap.lockPixels(BitmapLockFlags::ReadWrite);
+        ASSERT_EQ(px.getBytesPerPixel(), 8);
+        for (uint32_t y = 0; y < 8; ++y)
+        {
+            auto* row = reinterpret_cast<uint16_t*>(px.getAddress() + y * px.getBytesPerRow());
+            for (uint32_t x = 0; x < 8; ++x)
+            {
+                row[x * 4 + 0] = detail::floatToHalf(0.0f);
+                row[x * 4 + 1] = detail::floatToHalf(0.0f);
+                row[x * 4 + 2] = detail::floatToHalf(1.0f);
+                row[x * 4 + 3] = detail::floatToHalf(1.0f);
+            }
+        }
+    }
+
+    target.beginDraw();
+    target.drawBitmap(bitmap, Point{ 4.0f, 4.0f }, Rect{ 0.0f, 0.0f, 8.0f, 8.0f });
+    target.endDraw();
+    {
+        auto px = target.getBitmap().lockPixels(BitmapLockFlags::Read);
+        const auto c = pixelAt(px, 8, 8);
+        EXPECT_NEAR(c[0], 0.0f, 0.01f) << "stale red: the atlas copy did not follow the write lock";
+        EXPECT_NEAR(c[2], 1.0f, 0.01f);
+    }
+}
+
+// A linear stretch of the whole bitmap samples on the GPU; it must match
+// cpugfx's bilinear sampling, edge texels included.
+TEST_F(DrawingTest, GpuStretchedBitmapMatchesCpu)
+{
+    g.endDraw();
+    drawingActive = false;
+
+    auto* gpuFactory = dynamic_cast<gmpi::gpugfx::Factory*>(gmpi::drawing::AccessPtr::get(drawingContext.factory()));
+    ASSERT_NE(gpuFactory, nullptr);
+    gmpi::drawing::api::IBitmapRenderTarget* native{};
+    gpuFactory->cpu.createCpuRenderTarget({ 6, 6 }, 0, &native, 96.0f);
+    gmpi::drawing::BitmapRenderTarget source;
+    *gmpi::drawing::AccessPtr::put(source) = native;
+    source.beginDraw();
+    source.clear(Color{ 0.0f, 0.0f, 0.0f, 0.0f });
+    auto red = source.createSolidColorBrush(Colors::Red);
+    auto green = source.createSolidColorBrush(Color{ 0.0f, 1.0f, 0.0f, 0.5f });
+    source.fillRectangle({ 0.0f, 0.0f, 3.0f, 6.0f }, red);
+    source.fillRectangle({ 3.0f, 0.0f, 6.0f, 6.0f }, green);
+    source.endDraw();
+    auto bitmap = source.getBitmap();
+
+    const auto m = gpuVersusCpu(drawingContext, 64, 48, [&](gmpi::drawing::Graphics& rt) {
+        rt.drawBitmap(bitmap, Rect{ 5.0f, 4.0f, 57.0f, 44.0f }, Rect{ 0.0f, 0.0f, 6.0f, 6.0f }, 0.75f,
+                      BitmapInterpolationMode::Linear);
+    }, "stretch");
+    EXPECT_LT(m.worst, 0.01f) << "worst at (" << m.x << "," << m.y << ")";
+    EXPECT_EQ(m.outliers, 0u);
 }
 
 #endif
