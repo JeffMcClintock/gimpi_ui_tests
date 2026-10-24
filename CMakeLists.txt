@@ -177,6 +177,12 @@ add_executable(gmpi_ui_tests
     tests/DrawingTestContext_gpu.cpp
     tests/gpu_backend_tests.cpp
     tests/gpu_renderer_tests.cpp
+    # Shader brushes (GmpiApiShaders.h). shaders_test_shade.cpp is the test's
+    # shade() compiled for every renderer by compile_shaders.cmake's
+    # USER_SHADER mode; regenerate it when tests/shaders/test_shade.sh or
+    # gmpi_ui's templates change (the command is in the .sh).
+    tests/gpu_shader_tests.cpp
+    tests/shaders/compiled/shaders_test_shade.cpp
     ${GMPI_UI_SDK}/backends/DirectXGfx.cpp
     ${GMPI_UI_SDK}/experimental/grid.cpp
     ${GMPI_UI_SDK}/experimental/primatives.cpp
