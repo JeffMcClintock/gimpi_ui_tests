@@ -1107,3 +1107,90 @@ TEST_F(DrawingTest, GpuLargeFiguresOverTileBudgetFallBack)
     // ~1.9 Mpx each: the first two tile, the third is over 4 Mpx.
     EXPECT_EQ(cpuFallbacksFor(drawingContext, 1400, 1400, draw), 1u);
 }
+
+// --- Geometry clips larger than one atlas entry -----------------------------------
+// A clip over the 512x512 limit is a mask of only its visible part: cut to
+// its bounds within the clip rect and the surface, one atlas entry, and the
+// clip rect narrowed to the cut clip's pixels (GpuGfx.h visibleClipMask).
+// Draws under it stay on the GPU.
+
+TEST_F(DrawingTest, GpuLargeGeometryClipMatchesCpu)
+{
+    g.endDraw();
+    drawingActive = false;
+
+    for (auto rule : { FillMode::Winding, FillMode::Alternate })
+    {
+        auto draw = [&](gmpi::drawing::Graphics& rt) {
+            // A ~860 x 660 pentagram as the clip: self-intersecting, so the
+            // rules differ, and well over 512^2.
+            auto clip = bigPolygon(rt, rule, 450.0f, 350.0f, 430.0f, 330.0f, 5, 2);
+            rt.pushClipGeometry(clip);
+            auto red = rt.createSolidColorBrush(Colors::Red);
+            rt.fillRectangle({ 0.0f, 0.0f, 900.0f, 700.0f }, red);
+            const Gradientstop stops[] = { { 0.0f, Colors::Lime }, { 1.0f, Color{ 0.0f, 0.0f, 1.0f, 0.5f } } };
+            auto collection = rt.createGradientstopCollection(stops);
+            LinearGradientBrushProperties lp{ { 0.0f, 100.0f }, { 0.0f, 600.0f } };
+            auto gradient = rt.createLinearGradientBrush(lp, BrushProperties{}, collection);
+            rt.fillRectangle({ 300.0f, 100.0f, 620.0f, 600.0f }, gradient);
+            // and a large figure under it: tiles, each masked.
+            auto ellipse = bigPolygon(rt, FillMode::Winding, 450.0f, 350.0f, 400.0f, 300.0f, 200);
+            auto blue = rt.createSolidColorBrush(Color{ 0.0f, 0.2f, 1.0f, 0.5f });
+            rt.fillGeometry(ellipse, blue);
+            rt.popAxisAlignedClip();
+        };
+        const char* name = rule == FillMode::Winding ? "bigclip_winding" : "bigclip_evenodd";
+        const auto m = gpuVersusCpu(drawingContext, 900, 700, draw, name);
+        expectClipMatch(m, name);
+        EXPECT_EQ(cpuFallbacksFor(drawingContext, 900, 700, draw), 0u) << name;
+    }
+}
+
+// A clip far larger than the surface, whose visible part is one corner of
+// a huge triangle: the cut polygon is much smaller than the rect it was
+// cut to, so the clip rect must narrow to it (the mask entry ends at the
+// cut polygon's bounds). Also nested in a rect clip, and a clip that
+// cannot be seen at all, which draws nothing and takes no CPU path.
+TEST_F(DrawingTest, GpuHugeGeometryClipCutToVisible)
+{
+    g.endDraw();
+    drawingActive = false;
+
+    auto draw = [&](gmpi::drawing::Graphics& rt) {
+        auto triangle = rt.getFactory().createPathGeometry();
+        {
+            auto sink = triangle.open();
+            // Long side on x/180.5 + y/130.25 = 1: on screen, the corner
+            // (10,10)-(~166,10)-(10,~123) of the 10..290 x 10..190 clip rect.
+            sink.beginFigure({ -9000.0f, -9000.0f }, FigureBegin::Filled);
+            sink.addLine({ 180.5f * (1.0f + 9000.0f / 130.25f), -9000.0f });
+            sink.addLine({ -9000.0f, 130.25f * (1.0f + 9000.0f / 180.5f) });
+            sink.endFigure(FigureEnd::Closed);
+            sink.close();
+        }
+        rt.pushAxisAlignedClip({ 10.0f, 10.0f, 290.0f, 190.0f });
+        rt.pushClipGeometry(triangle);
+        auto red = rt.createSolidColorBrush(Color{ 1.0f, 0.2f, 0.0f, 0.8f });
+        rt.fillRectangle({ 0.0f, 0.0f, 300.0f, 200.0f }, red);
+        // Path fills under it, all over the clip rect: their atlas entries
+        // pack beside the mask's, so a fragment that sampled past the
+        // mask's entry would pick up their coverage.
+        auto white = rt.createSolidColorBrush(Color{ 1.0f, 1.0f, 1.0f, 0.7f });
+        for (int i = 0; i < 6; ++i)
+            for (int j = 0; j < 4; ++j)
+            {
+                auto star = bigPolygon(rt, FillMode::Winding, 25.0f + 50.0f * i, 25.0f + 50.0f * j, 22.0f, 22.0f, 5, 2);
+                rt.fillGeometry(star, white);
+            }
+        rt.popAxisAlignedClip();
+        rt.popAxisAlignedClip();
+
+        auto offscreen = bigPolygon(rt, FillMode::Winding, 5000.0f, 5000.0f, 2000.0f, 2000.0f, 64);
+        rt.pushClipGeometry(offscreen);
+        rt.fillRectangle({ 0.0f, 0.0f, 300.0f, 200.0f }, red);
+        rt.popAxisAlignedClip();
+    };
+    const auto m = gpuVersusCpu(drawingContext, 300, 200, draw, "bigclip_corner");
+    expectClipMatch(m, "corner");
+    EXPECT_EQ(cpuFallbacksFor(drawingContext, 300, 200, draw), 0u);
+}
