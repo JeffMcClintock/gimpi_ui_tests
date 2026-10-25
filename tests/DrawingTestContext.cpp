@@ -8,6 +8,8 @@
 #include "backends/DirectXGfx.h"
 #include "DrawingTestContext.h"
 
+// The GPU build has its own context (DrawingTestContext_gpu.cpp); only the WIC helper below is shared.
+#if !GMPI_UI_TESTS_BACKEND_GPU
 struct DrawingTestContext::Impl
 {
     std::unique_ptr<gmpi::directx::Factory> backendFactory;
@@ -32,6 +34,7 @@ gmpi::drawing::BitmapRenderTarget DrawingTestContext::createCpuRenderTarget(gmpi
 {
     return impl_->factory.createCpuRenderTarget(size, flags, dpi);
 }
+#endif // !GMPI_UI_TESTS_BACKEND_GPU
 
 /*static*/
 bool DrawingTestContext::createSRGBGradientPng(const std::filesystem::path& path)

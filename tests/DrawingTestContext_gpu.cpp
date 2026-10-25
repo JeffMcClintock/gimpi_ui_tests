@@ -25,6 +25,9 @@ struct DrawingTestContext::Impl
 
 DrawingTestContext::DrawingTestContext() : impl_(std::make_unique<Impl>())
 {
+#ifdef _WIN32
+    CoInitialize(nullptr); // the WIC image decoders need COM, as in the Direct2D context
+#endif
     // Same seams as the CPU backend: fonts, image decoding and shaping are the
     // host's, and text reaches the GPU as glyph geometry.
     impl_->textEngine.imageDecoder = gmpi::drawing::decodeImageMemory;
