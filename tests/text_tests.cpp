@@ -1161,7 +1161,7 @@ TEST_F(DrawingTest, TextBaselineLowestPixel_TimesNewRoman125)
 {
     auto makeTF = [this](float h) { return makeTextFormat(h, "Times New Roman"); };
     int errors = runBaselineLowestPixelTest(drawingContext, makeTF, 120.0f, "Times New Roman");
-#ifdef _WIN32
+#if defined(_WIN32) && !GMPI_UI_TESTS_BACKEND_GPU // the quirk is Direct2D's; the CPU backend predicts exactly
     constexpr int expectedErrors = 28; // 28 errors at 120 DPI due to rounding edge cases in D2D's snapping logic
 #else
     constexpr int expectedErrors = 0; // macOS predictions are exact after calibration
@@ -1197,7 +1197,7 @@ TEST_F(DrawingTest, TextBaselineLowestPixel_CourierNew125)
 {
     auto makeTF = [this](float h) { return makeTextFormat(h, "Courier New"); };
     int errors = runBaselineLowestPixelTest(drawingContext, makeTF, 120.0f, "Courier New");
-#ifdef _WIN32
+#if defined(_WIN32) && !GMPI_UI_TESTS_BACKEND_GPU // the quirk is Direct2D's; the CPU backend predicts exactly
     constexpr int expectedErrors = 42; // 28 errors at 120 DPI due to rounding edge cases in D2D's snapping logic
 #else
     constexpr int expectedErrors = 0; // macOS predictions are exact after calibration

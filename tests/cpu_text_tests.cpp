@@ -1522,5 +1522,49 @@ TEST(CpuText, TextWeightSampleSheet)
     EXPECT_GT(inkFraction(bmp), 0.001f);
 }
 
-#endif // GMPI_UI_HAVE_FONT_PROVIDER
+// A target's DPI scales text exactly as a scale transform does: the same words
+// drawn at 192 dpi and at 96 dpi under scale(2) land on the same pixels. (The
+// glyph masks were once placed with a transform that left the DPI out, so at
+// 200 % the text came out half size and at the wrong place.)
+TEST(CpuText, DpiScalesTextLikeATransform)
+{
+    TextContext ctx;
+    constexpr uint32_t W = 160, H = 80;
 
+    auto draw = [&](float dpi, bool scaleByTransform) {
+        auto rt = ctx.factory.createCpuRenderTarget({ W, H }, 0, dpi);
+        auto tf = ctx.makeFormat(14.f);
+        AccessPtr::get(tf)->setWordWrapping(WordWrapping::NoWrap);
+        rt.beginDraw();
+        rt.clear(Colors::White);
+        if (scaleByTransform)
+        {
+            const auto m = makeScale(2.f, 2.f);
+            AccessPtr::get(rt)->setTransform(&m);
+        }
+        rt.drawTextU("Lowest", tf, Rect{ 6.f, 6.f, 70.f, 30.f }, rt.createSolidColorBrush(Colors::Black));
+        rt.endDraw();
+        return rt.getBitmap();
+    };
+
+    auto dpiBmp = draw(192.f, false);
+    auto xformBmp = draw(96.f, true);
+
+    ASSERT_GT(inkFraction(dpiBmp), 0.001f) << "no text at 192 dpi";
+    const auto a = inkBounds(dpiBmp);
+    const auto b = inkBounds(xformBmp);
+    EXPECT_EQ(a.left, b.left);
+    EXPECT_EQ(a.top, b.top);
+    EXPECT_EQ(a.right, b.right);
+    EXPECT_EQ(a.bottom, b.bottom);
+
+    auto pa = dpiBmp.lockPixels(BitmapLockFlags::Read);
+    auto pb = xformBmp.lockPixels(BitmapLockFlags::Read);
+    int differing = 0;
+    for (uint32_t y = 0; y < H; ++y)
+        differing += std::memcmp(pa.getAddress() + size_t(y) * pa.getBytesPerRow(),
+                                 pb.getAddress() + size_t(y) * pb.getBytesPerRow(), W * 8) != 0;
+    EXPECT_EQ(differing, 0) << differing << " rows differ";
+}
+
+#endif // GMPI_UI_HAVE_FONT_PROVIDER
