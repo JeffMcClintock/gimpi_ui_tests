@@ -929,3 +929,37 @@ TEST_F(DrawingTest, GpuGradientStripsCachedPerOpacity)
     EXPECT_LT(m.worst, 0.01f) << "worst at (" << m.x << "," << m.y << ")";
     EXPECT_EQ(m.outliers, 0u);
 }
+
+// A tall multi-line block is padded by a LINE's height for overhanging ink,
+// not by the block's height: padding by the block's height made a browser
+// pane's 600 px text block a ~1.9 Mpx raster, over the cache's limit, and it
+// went to the CPU on every document open. It must cache, and lose no ink.
+TEST_F(DrawingTest, GpuTallTextBlockIsCachedAndComplete)
+{
+    g.endDraw();
+    drawingActive = false;
+
+    std::string text;
+    for (int i = 0; i < 40; ++i)
+        text += "Line " + std::to_string(i) + " gypsy jQ\n";
+    auto tf = makeTextFormat(14.0f);
+
+    const auto m = gpuVersusCpu(drawingContext, 200, 760, [&](gmpi::drawing::Graphics& rt) {
+        auto brush = rt.createSolidColorBrush(Colors::White);
+        rt.drawTextU(text, tf, { 4.0f, 4.0f, 196.0f, 756.0f }, brush);
+    }, "tall_text");
+    EXPECT_LT(m.worst, 0.01f) << "worst at (" << m.x << "," << m.y << ")";
+    EXPECT_EQ(m.outliers, 0u);
+
+    // ...and it went through the cache: drawing it again on a fresh target
+    // adds an entry rather than taking the CPU path.
+    auto target = drawingContext.createCpuRenderTarget({ 200, 760 }, 0);
+    auto targetBitmap = target.getBitmap();
+    auto* gpuBitmap = dynamic_cast<gmpi::gpugfx::Bitmap*>(AccessPtr::get(targetBitmap));
+    ASSERT_NE(gpuBitmap, nullptr);
+    target.beginDraw();
+    auto brush = target.createSolidColorBrush(Colors::White);
+    target.drawTextU(text, tf, { 4.0f, 4.0f, 196.0f, 756.0f }, brush);
+    target.endDraw();
+    EXPECT_EQ(gpuBitmap->textCache.size(), 1u);
+}
