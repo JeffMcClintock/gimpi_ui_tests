@@ -1534,11 +1534,10 @@ TEST_F(DrawingTest, AdditiveBitmap)
 // the mask is opaque, the right half transparent, so only the left is filled.
 // (Direct2D was once handed the fill brush as the mask, which filled it all.)
 // Direct2D only: the CPU and GPU backends decline an opacity brush.
-// DISABLED: on this target Direct2D draws nothing at all when FillGeometry is
-// given an opacity brush (bitmap fill brush, bitmap mask, aliased or not), and
-// EndDraw still reports success. Enable it once the masked fill works.
+// Direct2D draws nothing, silently, unless both brushes are bitmap brushes that clamp
+// and the target is aliased; the backend arranges that for the call.
 #if defined(_WIN32) && !GMPI_UI_TESTS_BACKEND_GPU
-TEST_F(DrawingTest, DISABLED_FillGeometryOpacityBrushMasksTheFill)
+TEST_F(DrawingTest, FillGeometryOpacityBrushMasksTheFill)
 {
     constexpr uint32_t kW = 32, kH = 16;
     const auto srgb = static_cast<int32_t>(gmpi::drawing::BitmapRenderTargetFlags::SRGBPixels);
