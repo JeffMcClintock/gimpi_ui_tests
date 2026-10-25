@@ -853,3 +853,79 @@ TEST_F(DrawingTest, GpuTextCacheSharesOneRasterAcrossColours)
         EXPECT_EQ(gpuBitmap->textCache.size(), before + 2) << "frame " << frame;
     }
 }
+
+// --- Bitmaps: cropped and nearest-neighbour stretches on the GPU -----------------
+// The image shader clamps its sample coordinate to the source rect and, for
+// nearest, snaps to the texel centre - cpugfx's sampling rule, so a cropped
+// stretch cannot bleed past its crop and needs no CPU fallback.
+
+namespace
+{
+Bitmap checkerImage(DrawingTestContext& ctx)
+{
+    auto image = ctx.factory().createImage(16, 16);
+    auto px = image.lockPixels(BitmapLockFlags::ReadWrite);
+    for (uint32_t y = 0; y < 16; ++y)
+        for (uint32_t x = 0; x < 16; ++x)
+        {
+            auto* p = reinterpret_cast<uint16_t*>(px.getAddress() + y * px.getBytesPerRow() + x * px.getBytesPerPixel());
+            // Distinct neighbours everywhere, so any bleed past a crop shows.
+            const float r = float(x) / 15.0f, g = float(y) / 15.0f, b = ((x + y) % 2) ? 1.0f : 0.0f;
+            p[0] = detail::floatToHalf(r);
+            p[1] = detail::floatToHalf(g);
+            p[2] = detail::floatToHalf(b);
+            p[3] = detail::floatToHalf(1.0f);
+        }
+    return image;
+}
+} // namespace
+
+TEST_F(DrawingTest, GpuBitmapCroppedAndNearestStretchesMatchCpu)
+{
+    g.endDraw();
+    drawingActive = false;
+
+    auto image = checkerImage(drawingContext);
+    struct Case { Rect dst, src; BitmapInterpolationMode mode; const char* name; };
+    const Case cases[] = {
+        { { 4.0f, 4.0f, 60.0f, 44.0f }, { 3.0f, 2.0f, 11.0f, 9.0f }, BitmapInterpolationMode::Linear, "cropped linear magnify" },
+        { { 2.0f, 2.0f, 9.0f, 7.0f },   { 1.0f, 1.0f, 15.0f, 12.0f }, BitmapInterpolationMode::Linear, "cropped linear minify" },
+        { { 4.0f, 4.0f, 59.0f, 59.0f }, { 0.0f, 0.0f, 16.0f, 16.0f }, BitmapInterpolationMode::NearestNeighbor, "whole nearest" },
+        { { 6.0f, 5.0f, 58.0f, 47.0f }, { 5.0f, 3.0f, 12.0f, 10.0f }, BitmapInterpolationMode::NearestNeighbor, "cropped nearest" },
+    };
+    for (const auto& c : cases)
+    {
+        const auto m = gpuVersusCpu(drawingContext, 64, 64, [&](gmpi::drawing::Graphics& rt) {
+            rt.drawBitmap(image, c.dst, c.src, 1.0f, c.mode);
+        }, "bitmap_stretch");
+        // Nearest: a pixel centre exactly on a texel boundary may take either
+        // neighbour (fs_tinted_texture.sc). A 16 -> 55 stretch has one such
+        // column and one row (at texel 8), so allow those two lines of
+        // pixels and nothing else; filtered cases must match outright.
+        const uint32_t tieLines = c.mode == BitmapInterpolationMode::NearestNeighbor ? 2u * 64u : 0u;
+        expectClipMatch(m, c.name, tieLines);
+    }
+}
+
+// Gradient strips are cached per stop collection AND opacity: one collection
+// drawn at two opacities in one frame must give two strips.
+TEST_F(DrawingTest, GpuGradientStripsCachedPerOpacity)
+{
+    g.endDraw();
+    drawingActive = false;
+
+    const auto m = gpuVersusCpu(drawingContext, 96, 48, [&](gmpi::drawing::Graphics& rt) {
+        const Gradientstop stops[] = { { 0.0f, Colors::Red }, { 1.0f, Colors::Blue } };
+        auto collection = rt.createGradientstopCollection(stops);
+        for (int i = 0; i < 2; ++i)
+        {
+            BrushProperties bp{};
+            bp.opacity = i == 0 ? 1.0f : 0.4f;
+            LinearGradientBrushProperties lp{ { 0.0f, 0.0f }, { 96.0f, 0.0f } };
+            auto brush = rt.createLinearGradientBrush(lp, bp, collection);
+            rt.fillRectangle({ 0.0f, 24.0f * i, 96.0f, 24.0f * (i + 1) }, brush);
+        }
+    }, "gradient_opacity");
+    EXPECT_LT(m.worst, 0.01f) << "worst at (" << m.x << "," << m.y << ")";
+    EXPECT_EQ(m.outliers, 0u);
+}
