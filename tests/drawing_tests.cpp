@@ -1570,7 +1570,10 @@ TEST_F(DrawingTest, FillGeometryOpacityBrushMasksTheFill)
     auto maskBitmap = maskRT.getBitmap();
     rt.beginDraw();
     rt.clear(Colors::White);
-    rt.fillGeometry(geom, rt.createBitmapBrush(fillBitmap), rt.createBitmapBrush(maskBitmap));
+    // Graphics has no wrapper for the opacity brush (only Direct2D honours it), so use the ABI.
+    auto fillBrush = rt.createBitmapBrush(fillBitmap);
+    auto maskBrush = rt.createBitmapBrush(maskBitmap);
+    AccessPtr::get(rt)->fillGeometry(AccessPtr::get(geom), AccessPtr::get(fillBrush), AccessPtr::get(maskBrush));
     rt.endDraw();
 
     auto bmp    = rt.getBitmap();
