@@ -963,3 +963,147 @@ TEST_F(DrawingTest, GpuTallTextBlockIsCachedAndComplete)
     target.endDraw();
     EXPECT_EQ(gpuBitmap->textCache.size(), 1u);
 }
+
+// --- Figures larger than one atlas entry, as tiles ------------------------------
+// A figure whose bounds exceed 512x512 texels is cut into tiles of at most
+// 512 square over its visible part, each its own path-atlas entry
+// (GpuGfx.h fillTiled / clipPathToRect). Tiles meet on whole pixels, so the
+// result must match cpugfx as an untiled fill does - and take no CPU path.
+
+namespace
+{
+// A closed polygon: an ellipse of `n` points, or (step 2 of 5) a pentagram,
+// which self-intersects so the two fill rules differ.
+PathGeometry bigPolygon(gmpi::drawing::Graphics& rt, FillMode fillMode, float cx, float cy, float rx, float ry,
+                        int n, int step = 1)
+{
+    auto geometry = rt.getFactory().createPathGeometry();
+    auto sink = geometry.open();
+    sink.setFillMode(fillMode);
+    for (int k = 0; k < n; ++k)
+    {
+        const float ang = -3.14159265f / 2.0f + float(k * step) * (2.0f * 3.14159265f / float(n));
+        const gmpi::drawing::Point p{ cx + rx * std::cos(ang), cy + ry * std::sin(ang) };
+        if (k == 0)
+            sink.beginFigure(p, FigureBegin::Filled);
+        else
+            sink.addLine(p);
+    }
+    sink.endFigure(FigureEnd::Closed);
+    sink.close();
+    return geometry;
+}
+
+// The same drawing again on a fresh GPU target, counting CPU fallbacks.
+template<typename Draw>
+uint32_t cpuFallbacksFor(DrawingTestContext& ctx, uint32_t w, uint32_t h, Draw draw)
+{
+    auto target = ctx.createCpuRenderTarget({ w, h }, 0);
+    auto targetBitmap = target.getBitmap();
+    auto* gpuBitmap = dynamic_cast<gmpi::gpugfx::Bitmap*>(AccessPtr::get(targetBitmap));
+    EXPECT_NE(gpuBitmap, nullptr);
+    if (!gpuBitmap)
+        return ~0u;
+    target.beginDraw();
+    draw(target);
+    target.endDraw();
+    return gpuBitmap->cpuFallbacks;
+}
+} // namespace
+
+TEST_F(DrawingTest, GpuLargeFigureTilesMatchCpu)
+{
+    g.endDraw();
+    drawingActive = false;
+
+    for (auto rule : { FillMode::Winding, FillMode::Alternate })
+    {
+        auto draw = [&](gmpi::drawing::Graphics& rt) {
+            // ~1100 x 640: six tiles, with tile seams through edges and interior.
+            auto ellipse = bigPolygon(rt, rule, 600.0f, 350.0f, 548.3f, 318.7f, 300);
+            auto red = rt.createSolidColorBrush(Color{ 1.0f, 0.0f, 0.0f, 0.6f });
+            rt.fillGeometry(ellipse, red);
+            // A pentagram over the seams, under a gradient brush (device space).
+            auto star = bigPolygon(rt, rule, 610.0f, 340.0f, 330.0f, 330.0f, 5, 2);
+            const Gradientstop stops[] = { { 0.0f, Colors::Lime }, { 1.0f, Color{ 0.0f, 0.0f, 1.0f, 0.7f } } };
+            auto collection = rt.createGradientstopCollection(stops);
+            LinearGradientBrushProperties lp{ { 280.0f, 0.0f }, { 940.0f, 0.0f } };
+            auto gradient = rt.createLinearGradientBrush(lp, BrushProperties{}, collection);
+            rt.fillGeometry(star, gradient);
+        };
+        const char* name = rule == FillMode::Winding ? "tiles_winding" : "tiles_evenodd";
+        const auto m = gpuVersusCpu(drawingContext, 1200, 700, draw, name);
+        EXPECT_LT(m.worst, 0.01f) << name << ": worst at (" << m.x << "," << m.y << ")";
+        EXPECT_LE(m.outliers, 0u) << name;
+        EXPECT_EQ(cpuFallbacksFor(drawingContext, 1200, 700, draw), 0u) << name;
+    }
+}
+
+// A figure far larger than the surface (a 20000 px circle whose edge
+// crosses a small target) costs only its visible part: one or two tiles,
+// not a 20000^2 raster. Also under a rect clip and a transform.
+TEST_F(DrawingTest, GpuHugeFigureTilesOnlyWhatIsVisible)
+{
+    g.endDraw();
+    drawingActive = false;
+
+    auto draw = [&](gmpi::drawing::Graphics& rt) {
+        auto circle = bigPolygon(rt, FillMode::Winding, 10150.0f, 100.0f, 10000.0f, 10000.0f, 4000);
+        auto blue = rt.createSolidColorBrush(Color{ 0.2f, 0.4f, 1.0f, 0.8f });
+        rt.fillGeometry(circle, blue);
+
+        rt.pushAxisAlignedClip({ 20.0f, 30.0f, 260.0f, 170.0f });
+        rt.setTransform(makeRotation(0.3f, { 150.0f, 100.0f }));
+        auto huge = bigPolygon(rt, FillMode::Alternate, 150.0f, 100.0f, 900.0f, 700.0f, 5, 2);
+        auto green = rt.createSolidColorBrush(Color{ 0.0f, 1.0f, 0.3f, 0.5f });
+        rt.fillGeometry(huge, green);
+        rt.setTransform(Matrix3x2{});
+        rt.popAxisAlignedClip();
+    };
+    const auto m = gpuVersusCpu(drawingContext, 300, 200, draw, "tiles_huge");
+    EXPECT_LT(m.worst, 0.01f) << "worst at (" << m.x << "," << m.y << ")";
+    EXPECT_EQ(m.outliers, 0u);
+    EXPECT_EQ(cpuFallbacksFor(drawingContext, 300, 200, draw), 0u);
+}
+
+// Tiles under a shaped clip: each tile's batch carries the clip mask.
+TEST_F(DrawingTest, GpuLargeFigureTilesUnderGeometryClip)
+{
+    g.endDraw();
+    drawingActive = false;
+
+    auto draw = [&](gmpi::drawing::Graphics& rt) {
+        auto clip = bigPolygon(rt, FillMode::Winding, 400.0f, 300.0f, 240.0f, 200.0f, 7, 3);
+        rt.pushClipGeometry(clip);
+        auto ellipse = bigPolygon(rt, FillMode::Winding, 400.0f, 300.0f, 390.0f, 290.0f, 200);
+        auto red = rt.createSolidColorBrush(Color{ 1.0f, 0.3f, 0.0f, 0.7f });
+        rt.fillGeometry(ellipse, red);
+        rt.popAxisAlignedClip();
+    };
+    const auto m = gpuVersusCpu(drawingContext, 800, 600, draw, "tiles_clip");
+    EXPECT_LT(m.worst, 0.01f) << "worst at (" << m.x << "," << m.y << ")";
+    EXPECT_LE(m.outliers, 2u);
+    EXPECT_EQ(cpuFallbacksFor(drawingContext, 800, 600, draw), 0u);
+}
+
+// Past the frame's tile budget (4 Mpx of tiles) a large figure goes to the
+// CPU as before, and the picture is the same.
+TEST_F(DrawingTest, GpuLargeFiguresOverTileBudgetFallBack)
+{
+    g.endDraw();
+    drawingActive = false;
+
+    auto draw = [&](gmpi::drawing::Graphics& rt) {
+        for (int i = 0; i < 3; ++i)
+        {
+            auto ellipse = bigPolygon(rt, FillMode::Winding, 700.0f + 3.0f * i, 700.0f, 690.0f - 40.0f * i, 690.0f, 400);
+            auto brush = rt.createSolidColorBrush(Color{ 0.3f * i, 0.5f, 1.0f - 0.3f * i, 0.4f });
+            rt.fillGeometry(ellipse, brush);
+        }
+    };
+    const auto m = gpuVersusCpu(drawingContext, 1400, 1400, draw, "tiles_budget");
+    EXPECT_LT(m.worst, 0.01f) << "worst at (" << m.x << "," << m.y << ")";
+    EXPECT_EQ(m.outliers, 0u);
+    // ~1.9 Mpx each: the first two tile, the third is over 4 Mpx.
+    EXPECT_EQ(cpuFallbacksFor(drawingContext, 1400, 1400, draw), 1u);
+}
