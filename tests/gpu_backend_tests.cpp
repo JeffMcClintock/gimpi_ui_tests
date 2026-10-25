@@ -771,3 +771,85 @@ TEST_F(DrawingTest, GpuNestedGeometryClips)
     }, "clip_nested");
     expectClipMatch(m, "nested geometry clips", 4);
 }
+
+// --- Text as tinted coverage ----------------------------------------------------
+// Text is cached as coverage per coverage class (opaque at a luminance, or
+// translucent) and tinted on the GPU (GpuGfx.h, Bitmap::TextKey). The engine
+// warps opaque coverage by luminance to match DirectWrite, so the tint must
+// reproduce what rasterising in the real colour gives - the CPU oracle.
+
+TEST_F(DrawingTest, GpuTintedTextMatchesCpu)
+{
+    g.endDraw();
+    drawingActive = false;
+
+    auto tf = makeTextFormat(13.0f); // small: the luminance warp is at full strength
+    const Color colours[] = {
+        Colors::Black, Colors::White, Color{ 0.9f, 0.1f, 0.1f, 1.0f }, Color{ 0.1f, 0.6f, 0.9f, 1.0f },
+        Color{ 1.0f, 1.0f, 1.0f, 0.6f }, Color{ 0.0f, 0.0f, 0.0f, 0.4f }, Color{ 0.2f, 0.9f, 0.3f, 0.75f },
+    };
+    for (const auto& c : colours)
+    {
+        const auto m = gpuVersusCpu(drawingContext, 120, 40, [&](gmpi::drawing::Graphics& rt) {
+            auto mid = rt.createSolidColorBrush(Color{ 0.45f, 0.45f, 0.5f, 1.0f });
+            rt.fillRectangle({ 0.0f, 0.0f, 120.0f, 40.0f }, mid); // a background both light and dark text show on
+            auto brush = rt.createSolidColorBrush(c);
+            rt.drawTextU("Gain 3.5dB", tf, { 4.25f, 6.5f, 116.0f, 34.0f }, brush); // on a cached phase (quarter pixels)
+        }, "tinted_text");
+        expectClipMatch(m, "tinted text", 0);
+    }
+}
+
+TEST_F(DrawingTest, GpuTextLayoutIsCachedAndMatchesCpu)
+{
+    g.endDraw();
+    drawingActive = false;
+
+    auto tf = makeTextFormat(14.0f);
+    auto layout = drawingContext.factory().createTextLayout("Oscillator", tf, 100.0f, 24.0f);
+    if (!AccessPtr::get(layout))
+        GTEST_SKIP() << "backend declines createTextLayout";
+    for (const auto& c : { Colors::White, Color{ 0.1f, 0.1f, 0.1f, 1.0f }, Color{ 1.0f, 0.8f, 0.2f, 0.5f } })
+    {
+        const auto m = gpuVersusCpu(drawingContext, 110, 32, [&](gmpi::drawing::Graphics& rt) {
+            auto brush = rt.createSolidColorBrush(c);
+            rt.drawTextLayout(layout, { 3.25f, 4.5f }, brush);
+        }, "layout_text");
+        expectClipMatch(m, "layout text", 0);
+    }
+}
+
+TEST_F(DrawingTest, GpuTextCacheSharesOneRasterAcrossColours)
+{
+    // Translucent text has one coverage class whatever its colour, so three
+    // colours of the same string are one cache entry; an opaque colour is
+    // another (its own luminance class). Drawing them all again in a second
+    // frame adds nothing.
+    auto tf = makeTextFormat(13.0f);
+    auto targetBitmap = g.getBitmap();
+    auto* gpuBitmap = dynamic_cast<gmpi::gpugfx::Bitmap*>(AccessPtr::get(targetBitmap));
+    ASSERT_NE(gpuBitmap, nullptr);
+    const size_t before = gpuBitmap->textCache.size();
+
+    const Color translucent[] = { Color{ 1.0f, 0.0f, 0.0f, 0.5f }, Color{ 0.0f, 1.0f, 0.0f, 0.7f }, Color{ 0.2f, 0.2f, 1.0f, 0.3f } };
+    for (int frame = 0; frame < 2; ++frame)
+    {
+        if (frame == 1)
+        {
+            g.beginDraw();
+            drawingActive = true;
+        }
+        float y = 2.0f;
+        for (const auto& c : translucent)
+        {
+            auto brush = g.createSolidColorBrush(c);
+            g.drawTextU("shared", tf, { 2.0f, y, 60.0f, y + 18.0f }, brush);
+            y += 18.0f; // same phase, different place: same key
+        }
+        auto opaque = g.createSolidColorBrush(Colors::Black);
+        g.drawTextU("shared", tf, { 2.0f, 2.0f, 60.0f, 20.0f }, opaque);
+        g.endDraw();
+        drawingActive = false;
+        EXPECT_EQ(gpuBitmap->textCache.size(), before + 2) << "frame " << frame;
+    }
+}
