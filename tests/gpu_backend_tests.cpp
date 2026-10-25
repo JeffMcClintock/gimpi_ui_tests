@@ -739,7 +739,7 @@ TEST_F(DrawingTest, GpuClipGeometryClipsTextAndBitmaps)
     const auto m = gpuVersusCpu(drawingContext, 64, 64, [&](gmpi::drawing::Graphics& rt) {
         auto star = clipStar(rt, FillMode::Winding, 32.0f, 32.0f, 28.0f);
         rt.pushClipGeometry(star);
-        rt.drawBitmap(image, Point{ 0.0f, 32.0f }, Rect{ 0.0f, 0.0f, 32.0f, 32.0f }); // 1:1 atlas image
+        rt.drawBitmap(image, gmpi::drawing::Point{ 0.0f, 32.0f }, gmpi::drawing::Rect{ 0.0f, 0.0f, 32.0f, 32.0f }); // 1:1 atlas image
         auto white = rt.createSolidColorBrush(Colors::White);
         rt.drawTextU("Mg", tf, { 6.0f, 2.0f, 64.0f, 40.0f }, white);              // cached text
         rt.popAxisAlignedClip();
@@ -884,7 +884,7 @@ TEST_F(DrawingTest, GpuBitmapCroppedAndNearestStretchesMatchCpu)
     drawingActive = false;
 
     auto image = checkerImage(drawingContext);
-    struct Case { Rect dst, src; BitmapInterpolationMode mode; const char* name; };
+    struct Case { gmpi::drawing::Rect dst, src; BitmapInterpolationMode mode; const char* name; };
     const Case cases[] = {
         { { 4.0f, 4.0f, 60.0f, 44.0f }, { 3.0f, 2.0f, 11.0f, 9.0f }, BitmapInterpolationMode::Linear, "cropped linear magnify" },
         { { 2.0f, 2.0f, 9.0f, 7.0f },   { 1.0f, 1.0f, 15.0f, 12.0f }, BitmapInterpolationMode::Linear, "cropped linear minify" },

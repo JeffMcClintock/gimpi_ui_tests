@@ -124,7 +124,7 @@ TEST_F(GpuShader, ConstantShadeFillsItsRect)
 {
     auto* brush = makeBrush(Params().set(0, 0.0f, 0.0f, 1.0f, 1.0f)); // opaque blue
     ASSERT_NE(brush, nullptr);
-    const Rect rect{ 8.0f, 8.0f, 24.0f, 24.0f };
+    const gmpi::drawing::Rect rect{ 8.0f, 8.0f, 24.0f, 24.0f };
     EXPECT_EQ(dc()->fillRectangle(&rect, brush), gmpi::ReturnCode::Ok);
 
     auto px = finish();
@@ -145,8 +145,8 @@ TEST_F(GpuShader, ParamsReachTheShader)
     auto* half = makeBrush(Params().set(0, 0.0f, 0.0f, 0.0f, 0.5f)); // 50% black
     ASSERT_NE(green, nullptr);
     ASSERT_NE(half, nullptr);
-    const Rect a{ 0.0f, 0.0f, 32.0f, 64.0f };
-    const Rect b{ 32.0f, 0.0f, 64.0f, 64.0f };
+    const gmpi::drawing::Rect a{ 0.0f, 0.0f, 32.0f, 64.0f };
+    const gmpi::drawing::Rect b{ 32.0f, 0.0f, 64.0f, 64.0f };
     dc()->fillRectangle(&a, green);
     dc()->fillRectangle(&b, half);
 
@@ -161,10 +161,10 @@ TEST_F(GpuShader, BrushSpaceFollowsTheBrushTransform)
 {
     // red = p.x, with brush space = local / 64: a ramp across the target.
     BrushProperties props;
-    props.transform = makeScale(Size{ 64.0f, 64.0f }); // brush -> local
+    props.transform = makeScale(gmpi::drawing::Size{ 64.0f, 64.0f }); // brush -> local
     auto* brush = makeBrush(Params().set(0, 0.0f, 0.0f, 0.0f, 1.0f).set(1, 1.0f, 0.0f, 0.0f, 0.0f), 4, &props);
     ASSERT_NE(brush, nullptr);
-    const Rect rect{ 0.0f, 0.0f, 64.0f, 64.0f };
+    const gmpi::drawing::Rect rect{ 0.0f, 0.0f, 64.0f, 64.0f };
     dc()->fillRectangle(&rect, brush);
 
     auto px = finish();
@@ -179,12 +179,12 @@ TEST_F(GpuShader, BrushSpaceFollowsTheContextTransform)
     // The same ramp, drawn under a translated context: brush space is LOCAL
     // (through the context transform), so the ramp moves with the fill.
     BrushProperties props;
-    props.transform = makeScale(Size{ 32.0f, 32.0f });
+    props.transform = makeScale(gmpi::drawing::Size{ 32.0f, 32.0f });
     auto* brush = makeBrush(Params().set(0, 0.0f, 0.0f, 0.0f, 1.0f).set(1, 1.0f, 0.0f, 0.0f, 0.0f), 4, &props);
     ASSERT_NE(brush, nullptr);
-    const auto shift = makeTranslation(Size{ 32.0f, 0.0f });
+    const auto shift = makeTranslation(gmpi::drawing::Size{ 32.0f, 0.0f });
     dc()->setTransform(&shift);
-    const Rect rect{ 0.0f, 0.0f, 32.0f, 64.0f }; // lands on device x 32..64
+    const gmpi::drawing::Rect rect{ 0.0f, 0.0f, 32.0f, 64.0f }; // lands on device x 32..64
     dc()->fillRectangle(&rect, brush);
 
     auto px = finish();
@@ -203,9 +203,9 @@ TEST_F(GpuShader, PathFillIsShaded)
     auto geometry = drawingContext.factory().createPathGeometry();
     {
         auto sink = geometry.open();
-        sink.beginFigure(Point{ 4.0f, 60.0f }, FigureBegin::Filled);
-        sink.addLine(Point{ 60.0f, 60.0f });
-        sink.addLine(Point{ 32.0f, 4.0f });
+        sink.beginFigure(gmpi::drawing::Point{ 4.0f, 60.0f }, FigureBegin::Filled);
+        sink.addLine(gmpi::drawing::Point{ 60.0f, 60.0f });
+        sink.addLine(gmpi::drawing::Point{ 32.0f, 4.0f });
         sink.endFigure();
         sink.close();
     }
@@ -223,9 +223,9 @@ TEST_F(GpuShader, HonoursTheClip)
 {
     auto* brush = makeBrush(Params().set(0, 0.0f, 0.0f, 1.0f, 1.0f));
     ASSERT_NE(brush, nullptr);
-    const Rect clip{ 16.0f, 16.0f, 48.0f, 48.0f };
+    const gmpi::drawing::Rect clip{ 16.0f, 16.0f, 48.0f, 48.0f };
     dc()->pushAxisAlignedClip(&clip);
-    const Rect rect{ 0.0f, 0.0f, 64.0f, 64.0f };
+    const gmpi::drawing::Rect rect{ 0.0f, 0.0f, 64.0f, 64.0f };
     dc()->fillRectangle(&rect, brush);
     dc()->popAxisAlignedClip();
 
@@ -243,9 +243,9 @@ TEST_F(GpuShader, RotatedTransformPaintsTheFallbackColour)
     // and not the shader's blue.
     auto* brush = makeBrush(Params().set(0, 0.0f, 0.0f, 1.0f, 1.0f));
     ASSERT_NE(brush, nullptr);
-    const auto rot = makeRotation(0.5f, Point{ 32.0f, 32.0f });
+    const auto rot = makeRotation(0.5f, gmpi::drawing::Point{ 32.0f, 32.0f });
     dc()->setTransform(&rot);
-    const Rect rect{ 8.0f, 8.0f, 56.0f, 56.0f };
+    const gmpi::drawing::Rect rect{ 8.0f, 8.0f, 56.0f, 56.0f };
     dc()->fillRectangle(&rect, brush);
 
     auto px = finish();
@@ -264,14 +264,14 @@ TEST_F(GpuShader, ShadesUnderAGeometryClip)
     auto clip = drawingContext.factory().createPathGeometry();
     {
         auto sink = clip.open();
-        sink.beginFigure(Point{ 8.0f, 8.0f }, FigureBegin::Filled);
-        sink.addLine(Point{ 56.0f, 8.0f });
-        sink.addLine(Point{ 8.0f, 56.0f });
+        sink.beginFigure(gmpi::drawing::Point{ 8.0f, 8.0f }, FigureBegin::Filled);
+        sink.addLine(gmpi::drawing::Point{ 56.0f, 8.0f });
+        sink.addLine(gmpi::drawing::Point{ 8.0f, 56.0f });
         sink.endFigure();
         sink.close();
     }
     dc()->pushClipGeometry(AccessPtr::get(clip));
-    const Rect rect{ 0.0f, 0.0f, 64.0f, 64.0f };
+    const gmpi::drawing::Rect rect{ 0.0f, 0.0f, 64.0f, 64.0f };
     EXPECT_EQ(dc()->fillRectangle(&rect, brush), gmpi::ReturnCode::Ok);
     dc()->popAxisAlignedClip();
 
@@ -295,7 +295,7 @@ TEST_F(GpuShader, TextPaintsTheFallbackColour)
     auto* brush = makeBrush(Params().set(0, 0.0f, 0.0f, 1.0f, 1.0f));
     ASSERT_NE(brush, nullptr);
     auto tf = makeTextFormat(40.0f);
-    const Rect rect{ 0.0f, 0.0f, 64.0f, 64.0f };
+    const gmpi::drawing::Rect rect{ 0.0f, 0.0f, 64.0f, 64.0f };
     const char text[] = "MM";
     dc()->drawTextU(text, 2, AccessPtr::get(tf), &rect, brush, 0);
 
@@ -321,7 +321,7 @@ TEST_F(GpuShader, BrushesFromOneBlobTableShareOneProgram)
     auto* b = makeBrush(Params().set(0, 0.0f, 1.0f, 0.0f, 1.0f));
     ASSERT_NE(a, nullptr);
     ASSERT_NE(b, nullptr);
-    const Rect ra{ 0.0f, 0.0f, 32.0f, 64.0f };
+    const gmpi::drawing::Rect ra{ 0.0f, 0.0f, 32.0f, 64.0f };
     dc()->fillRectangle(&ra, a);
     g.endDraw();
     drawingActive = false;
@@ -329,7 +329,7 @@ TEST_F(GpuShader, BrushesFromOneBlobTableShareOneProgram)
 
     g.beginDraw();
     drawingActive = true;
-    const Rect rb{ 32.0f, 0.0f, 64.0f, 64.0f };
+    const gmpi::drawing::Rect rb{ 32.0f, 0.0f, 64.0f, 64.0f };
     dc()->fillRectangle(&rb, b);
     auto px = finish();
     EXPECT_EQ(gmpi::gpu::ProgramCache::programList().size(), before);
@@ -345,7 +345,7 @@ TEST_F(GpuShader, TimeAdvancesBetweenFrames)
     // growth across two frames some milliseconds apart.
     auto* brush = makeBrush(Params().set(0, 0.0f, 0.0f, 0.0f, 1.0f).set(3, 1.0f, 0.0f, 0.0f, 0.0f));
     ASSERT_NE(brush, nullptr);
-    const Rect rect{ 0.0f, 0.0f, 64.0f, 64.0f };
+    const gmpi::drawing::Rect rect{ 0.0f, 0.0f, 64.0f, 64.0f };
     dc()->fillRectangle(&rect, brush);
     float first{};
     {
