@@ -503,8 +503,6 @@ TEST(GpuRenderer, DestroyingACanvasBetweenFramesLeavesOtherCanvasesIntact) {
   EXPECT_TRUE(bad == 0);
 }
 
-#endif
-
 // A windowless canvas resets the renderer; that reset must keep the flags
 // windows depend on. It used to pass FLUSH | FLIP only, dropping
 // SRGB_BACKBUFFER (Linux swap chains are 8-bit sRGB) and VSYNC, so any
@@ -521,3 +519,5 @@ TEST(GpuRenderer, WindowlessCanvasKeepsTheWindowResetFlags) {
 #endif
   EXPECT_FALSE(renderer.vsync()) << "an offscreen canvas made first would impose vsync on later windows";
 }
+
+#endif // GMPI_UI_TESTS_BACKEND_GPU

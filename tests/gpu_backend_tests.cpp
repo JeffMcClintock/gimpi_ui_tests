@@ -596,8 +596,6 @@ TEST_F(DrawingTest, GpuStretchedBitmapMatchesCpu)
     EXPECT_EQ(m.outliers, 0u);
 }
 
-#endif
-
 // --- Geometry clips as GPU coverage masks -----------------------------------
 // A shaped clip is an entry in the path atlas that every shape under it
 // samples (gmpi_ui backends/gpu/clip_mask.h). The CPU oracle applies the
@@ -1194,3 +1192,5 @@ TEST_F(DrawingTest, GpuHugeGeometryClipCutToVisible)
     expectClipMatch(m, "corner");
     EXPECT_EQ(cpuFallbacksFor(drawingContext, 300, 200, draw), 0u);
 }
+
+#endif // GMPI_UI_TESTS_BACKEND_GPU
