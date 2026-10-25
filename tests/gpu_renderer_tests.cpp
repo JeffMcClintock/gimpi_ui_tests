@@ -168,6 +168,7 @@ TEST(GpuRenderer, ReportRendererCapabilities) {
        << ", texture read back: " << ((caps->supported & BGFX_CAPS_TEXTURE_READ_BACK) ? "yes" : "no")
        << ", RGBA16F framebuffer: " << ((caps->formats[bgfx::TextureFormat::RGBA16F] & BGFX_CAPS_FORMAT_TEXTURE_FRAMEBUFFER) ? "yes" : "no")
        << ", R32F framebuffer: " << ((caps->formats[bgfx::TextureFormat::R32F] & BGFX_CAPS_FORMAT_TEXTURE_FRAMEBUFFER) ? "yes" : "no")
+       << ", origin bottom-left: " << (caps->originBottomLeft ? "yes" : "no")
        << ", half-float layers: " << (Renderer::instance().halfFloatFrameBuffers() ? "on" : "off"));
 }
 

@@ -162,6 +162,7 @@ endif()
 
 add_executable(gmpi_ui_tests
     tests/drawing_tests.cpp
+    tests/transform_edge_tests.cpp
     tests/text_tests.cpp
     tests/layout_tests.cpp
     tests/cpu_backend_tests.cpp
