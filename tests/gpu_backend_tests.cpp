@@ -1193,4 +1193,43 @@ TEST_F(DrawingTest, GpuHugeGeometryClipCutToVisible)
     EXPECT_EQ(cpuFallbacksFor(drawingContext, 300, 200, draw), 0u);
 }
 
+// --- Strokes on the CPU path ---------------------------------------------------
+// Under nested shaped clips (one mask only) a stroke goes through cpugfx. The
+// adaptor has already widened it for its bounds, and the CPU fill uses those
+// widened figures rather than widening again: the picture must be cpugfx's
+// own drawGeometry, dashes and caps included.
+TEST_F(DrawingTest, GpuStrokeOnTheCpuPathMatchesCpu)
+{
+    g.endDraw();
+    drawingActive = false;
+
+    auto draw = [&](gmpi::drawing::Graphics& rt) {
+        auto outer = bigPolygon(rt, FillMode::Winding, 80.0f, 60.0f, 76.0f, 56.0f, 40);
+        auto inner = bigPolygon(rt, FillMode::Winding, 80.0f, 60.0f, 60.0f, 60.0f, 5, 2);
+        rt.pushClipGeometry(outer);
+        rt.pushClipGeometry(inner);
+        auto wave = rt.getFactory().createPathGeometry();
+        {
+            auto sink = wave.open();
+            sink.beginFigure({ 4.0f, 60.0f }, FigureBegin::Hollow);
+            for (int i = 1; i <= 32; ++i)
+                sink.addLine({ 4.0f + 4.8f * i, 60.0f + 40.0f * std::sin(i * 0.5f) });
+            sink.endFigure(FigureEnd::Open);
+            sink.close();
+        }
+        auto yellow = rt.createSolidColorBrush(Color{ 1.0f, 0.9f, 0.0f, 0.8f });
+        const float dashes[] = { 3.0f, 1.5f };
+        StrokeStyleProperties sp{};
+        sp.lineCap = CapStyle::Round;
+        sp.dashStyle = DashStyle::Custom;
+        auto style = rt.getFactory().createStrokeStyle(sp, dashes);
+        rt.drawGeometry(wave, yellow, 5.0f, style);
+        rt.popAxisAlignedClip();
+        rt.popAxisAlignedClip();
+    };
+    const auto m = gpuVersusCpu(drawingContext, 160, 120, draw, "cpu_stroke");
+    expectClipMatch(m, "stroke on the CPU path", 0);
+    EXPECT_GE(cpuFallbacksFor(drawingContext, 160, 120, draw), 1u) << "meant to exercise the CPU path";
+}
+
 #endif // GMPI_UI_TESTS_BACKEND_GPU
