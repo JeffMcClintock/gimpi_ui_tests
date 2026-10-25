@@ -597,3 +597,177 @@ TEST_F(DrawingTest, GpuStretchedBitmapMatchesCpu)
 }
 
 #endif
+
+// --- Geometry clips as GPU coverage masks -----------------------------------
+// A shaped clip is an entry in the path atlas that every shape under it
+// samples (gmpi_ui backends/gpu/clip_mask.h). The CPU oracle applies the
+// same clip as cpugfx coverage, which CpuVsD2D holds to Direct2D; both are
+// exact area coverage, so they should agree to quantisation.
+
+namespace
+{
+PathGeometry clipStar(gmpi::drawing::Graphics& rt, FillMode fillMode, float cx, float cy, float radius)
+{
+    auto geometry = rt.getFactory().createPathGeometry();
+    auto sink = geometry.open();
+    gmpi::drawing::Point pts[5];
+    for (int k = 0; k < 5; ++k)
+    {
+        const float ang = -3.14159265f / 2.0f + float(k) * (4.0f * 3.14159265f / 5.0f);
+        pts[k] = { cx + radius * std::cos(ang), cy + radius * std::sin(ang) };
+    }
+    sink.setFillMode(fillMode);
+    sink.beginFigure(pts[0], FigureBegin::Filled);
+    for (int k = 1; k < 5; ++k)
+        sink.addLine(pts[k]);
+    sink.endFigure(FigureEnd::Closed);
+    sink.close();
+    return geometry;
+}
+
+void expectClipMatch(const Mismatch& m, const char* what, uint32_t maxOutliers = 2)
+{
+    EXPECT_LT(m.worst, 0.01f) << what << ": worst at (" << m.x << "," << m.y << ")";
+    EXPECT_LE(m.outliers, maxOutliers) << what << ": outlier pixels";
+}
+} // namespace
+
+TEST_F(DrawingTest, GpuClipGeometryMatchesCpu)
+{
+    g.endDraw();
+    drawingActive = false;
+
+    for (auto rule : { FillMode::Winding, FillMode::Alternate })
+    {
+        const auto m = gpuVersusCpu(drawingContext, 64, 64, [&](gmpi::drawing::Graphics& rt) {
+            auto star = clipStar(rt, rule, 32.0f, 32.0f, 24.0f);
+            rt.pushClipGeometry(star);
+            auto red = rt.createSolidColorBrush(Colors::Red);
+            rt.fillRectangle({ 0.0f, 0.0f, 64.0f, 64.0f }, red);
+            // Translucent, overlapping the star's edge: the clip must scale
+            // alpha, not just gate it. (An SDF circle here would add its own
+            // edge difference from cpugfx, which is not what this tests.)
+            auto blue = rt.createSolidColorBrush(Color{ 0.0f, 0.0f, 1.0f, 0.5f });
+            rt.fillRectangle({ 30.0f, 26.0f, 60.0f, 60.0f }, blue);
+            rt.popAxisAlignedClip();
+        }, rule == FillMode::Winding ? "clip_star_winding" : "clip_star_evenodd");
+        expectClipMatch(m, rule == FillMode::Winding ? "winding" : "even-odd");
+    }
+}
+
+TEST_F(DrawingTest, GpuClipGeometryIntersectsRectClip)
+{
+    g.endDraw();
+    drawingActive = false;
+
+    const auto m = gpuVersusCpu(drawingContext, 64, 64, [&](gmpi::drawing::Graphics& rt) {
+        rt.pushAxisAlignedClip({ 0.0f, 0.0f, 64.0f, 36.0f });
+        auto star = clipStar(rt, FillMode::Winding, 32.0f, 32.0f, 24.0f);
+        rt.pushClipGeometry(star);
+        auto red = rt.createSolidColorBrush(Colors::Red);
+        rt.fillRectangle({ 0.0f, 0.0f, 64.0f, 64.0f }, red);
+        rt.popAxisAlignedClip();
+        auto blue = rt.createSolidColorBrush(Colors::Blue);
+        rt.fillRectangle({ 0.0f, 40.0f, 64.0f, 64.0f }, blue); // still clipped to the top: invisible
+        rt.popAxisAlignedClip();
+        rt.fillRectangle({ 56.0f, 56.0f, 64.0f, 64.0f }, blue); // unclipped
+    }, "clip_star_nested_rect");
+    expectClipMatch(m, "star inside a rect clip");
+}
+
+TEST_F(DrawingTest, GpuClearRespectsGeometryClip)
+{
+    g.endDraw();
+    drawingActive = false;
+
+    // A clear under a shaped clip replaces only what the clip admits, edge
+    // interpolated - for an opaque colour and for transparent, which a
+    // "fill over" could not do.
+    for (auto colour : { Colors::Orange, Color{ 0.0f, 0.0f, 0.0f, 0.0f }, Color{ 0.2f, 0.9f, 0.3f, 0.5f } })
+    {
+        const auto m = gpuVersusCpu(drawingContext, 64, 64, [&](gmpi::drawing::Graphics& rt) {
+            auto blue = rt.createSolidColorBrush(Colors::Blue);
+            rt.fillRectangle({ 0.0f, 0.0f, 64.0f, 64.0f }, blue); // something to preserve
+            auto star = clipStar(rt, FillMode::Winding, 32.0f, 32.0f, 24.0f);
+            rt.pushClipGeometry(star);
+            rt.clear(colour);
+            rt.popAxisAlignedClip();
+        }, "clip_clear");
+        expectClipMatch(m, "masked clear");
+    }
+}
+
+TEST_F(DrawingTest, GpuClipGeometryUnderTransform)
+{
+    g.endDraw();
+    drawingActive = false;
+
+    const auto m = gpuVersusCpu(drawingContext, 96, 96, [&](gmpi::drawing::Graphics& rt) {
+        rt.setTransform(makeRotation(0.4f, { 48.0f, 48.0f }) * makeTranslation(8.0f, 4.0f));
+        auto star = clipStar(rt, FillMode::Winding, 40.0f, 44.0f, 30.0f);
+        rt.pushClipGeometry(star);
+        rt.setTransform(Matrix3x2{}); // draws under the clip need not share its transform
+        const Gradientstop stops[] = { { 0.0f, Colors::Yellow }, { 1.0f, Colors::DarkBlue } };
+        auto brush = rt.createLinearGradientBrush(rt.createGradientstopCollection(stops), { 0.0f, 0.0f }, { 96.0f, 96.0f });
+        rt.fillRectangle({ 0.0f, 0.0f, 96.0f, 96.0f }, brush);
+        rt.popAxisAlignedClip();
+    }, "clip_star_transform");
+    expectClipMatch(m, "rotated clip, gradient fill");
+}
+
+TEST_F(DrawingTest, GpuClipGeometryClipsTextAndBitmaps)
+{
+    g.endDraw();
+    drawingActive = false;
+
+    auto tf = makeTextFormat(28.0f);
+    auto image = drawingContext.factory().createImage(32, 32);
+    {
+        auto px = image.lockPixels(BitmapLockFlags::ReadWrite);
+        for (uint32_t y = 0; y < 32; ++y)
+            for (uint32_t x = 0; x < 32; ++x)
+            {
+                auto* p = reinterpret_cast<uint16_t*>(px.getAddress() + y * px.getBytesPerRow() + x * px.getBytesPerPixel());
+                const bool check = ((x / 4) + (y / 4)) % 2 == 0;
+                if (px.getBytesPerPixel() == 8)
+                {
+                    p[0] = detail::floatToHalf(check ? 1.0f : 0.0f);
+                    p[1] = detail::floatToHalf(check ? 0.5f : 0.0f);
+                    p[2] = detail::floatToHalf(check ? 0.0f : 1.0f);
+                    p[3] = detail::floatToHalf(1.0f);
+                }
+            }
+    }
+    const auto m = gpuVersusCpu(drawingContext, 64, 64, [&](gmpi::drawing::Graphics& rt) {
+        auto star = clipStar(rt, FillMode::Winding, 32.0f, 32.0f, 28.0f);
+        rt.pushClipGeometry(star);
+        rt.drawBitmap(image, Point{ 0.0f, 32.0f }, Rect{ 0.0f, 0.0f, 32.0f, 32.0f }); // 1:1 atlas image
+        auto white = rt.createSolidColorBrush(Colors::White);
+        rt.drawTextU("Mg", tf, { 6.0f, 2.0f, 64.0f, 40.0f }, white);              // cached text
+        rt.popAxisAlignedClip();
+    }, "clip_text_bitmap");
+    expectClipMatch(m, "text and bitmap under a clip", 8);
+}
+
+TEST_F(DrawingTest, GpuNestedGeometryClips)
+{
+    g.endDraw();
+    drawingActive = false;
+
+    // The outer clip is a GPU mask; the inner one cannot be (the atlas holds
+    // one coverage per draw), so draws under both take the CPU path for the
+    // inner clip, and the outer mask still applies to what they upload.
+    const auto m = gpuVersusCpu(drawingContext, 64, 64, [&](gmpi::drawing::Graphics& rt) {
+        auto star = clipStar(rt, FillMode::Winding, 32.0f, 32.0f, 26.0f);
+        rt.pushClipGeometry(star);
+        auto circle = clipStar(rt, FillMode::Winding, 24.0f, 40.0f, 20.0f); // a second shape, overlapping the first
+        rt.pushClipGeometry(circle);
+        auto red = rt.createSolidColorBrush(Colors::Red);
+        rt.fillRectangle({ 0.0f, 0.0f, 64.0f, 64.0f }, red);
+        rt.popAxisAlignedClip();
+        auto green = rt.createSolidColorBrush(Color{ 0.0f, 1.0f, 0.0f, 0.6f });
+        rt.fillRectangle({ 32.0f, 0.0f, 64.0f, 64.0f }, green); // outer clip only
+        rt.popAxisAlignedClip();
+    }, "clip_nested");
+    expectClipMatch(m, "nested geometry clips", 4);
+}

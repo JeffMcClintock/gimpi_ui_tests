@@ -253,6 +253,40 @@ TEST_F(GpuShader, RotatedTransformPaintsTheFallbackColour)
     brush->release();
 }
 
+TEST_F(GpuShader, ShadesUnderAGeometryClip)
+{
+    // Under a geometry clip the GPU used to refuse every draw and a shader
+    // brush painted its fallback colour. With the clip as a GPU mask the
+    // shader runs, and only inside the clip: shader blue inside, the clear
+    // white outside, no fallback red anywhere.
+    auto* brush = makeBrush(Params().set(0, 0.0f, 0.0f, 1.0f, 1.0f));
+    ASSERT_NE(brush, nullptr);
+    auto clip = drawingContext.factory().createPathGeometry();
+    {
+        auto sink = clip.open();
+        sink.beginFigure(Point{ 8.0f, 8.0f }, FigureBegin::Filled);
+        sink.addLine(Point{ 56.0f, 8.0f });
+        sink.addLine(Point{ 8.0f, 56.0f });
+        sink.endFigure();
+        sink.close();
+    }
+    dc()->pushClipGeometry(AccessPtr::get(clip));
+    const Rect rect{ 0.0f, 0.0f, 64.0f, 64.0f };
+    EXPECT_EQ(dc()->fillRectangle(&rect, brush), gmpi::ReturnCode::Ok);
+    dc()->popAxisAlignedClip();
+
+    auto px = finish();
+    expectPixel(px, 16, 16, 0.0f, 0.0f, 1.0f, 1.0f);  // inside the triangle
+    expectPixel(px, 48, 48, 1.0f, 1.0f, 1.0f, 1.0f);  // outside: the clear
+    for (uint32_t y = 0; y < kHeight; ++y)
+        for (uint32_t x = 0; x < kWidth; ++x)
+        {
+            const auto p = pixelAt(px, x, y);
+            EXPECT_FALSE(p[0] > 0.9f && p[1] < 0.5f && p[2] < 0.5f) << "fallback red at (" << x << "," << y << ")";
+        }
+    brush->release();
+}
+
 TEST_F(GpuShader, TextPaintsTheFallbackColour)
 {
     // Text has no shader route (v1): the glyphs come out in the fallback
