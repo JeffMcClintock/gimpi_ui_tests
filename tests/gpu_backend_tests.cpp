@@ -1232,4 +1232,30 @@ TEST_F(DrawingTest, GpuStrokeOnTheCpuPathMatchesCpu)
     EXPECT_GE(cpuFallbacksFor(drawingContext, 160, 120, draw), 1u) << "meant to exercise the CPU path";
 }
 
+// clear() is a REPLACE. Under nested shaped clips - the outer a GPU mask,
+// the inner one only the CPU can apply - it must replace only what both
+// admit, with their antialiased edges interpolated, over what is already
+// there; not fill the clip's bounding box.
+TEST_F(DrawingTest, GpuClearUnderNestedGeometryClipsReplacesOnlyTheShape)
+{
+    g.endDraw();
+    drawingActive = false;
+
+    auto draw = [&](gmpi::drawing::Graphics& rt) {
+        auto stripes = rt.createSolidColorBrush(Color{ 0.9f, 0.6f, 0.1f, 1.0f });
+        for (int i = 0; i < 8; ++i)
+            rt.fillRectangle({ 12.0f * i, 0.0f, 12.0f * i + 6.0f, 96.0f }, stripes);
+        auto outer = bigPolygon(rt, FillMode::Winding, 48.0f, 48.0f, 44.0f, 40.0f, 48);
+        auto inner = bigPolygon(rt, FillMode::Alternate, 50.0f, 46.0f, 38.0f, 38.0f, 5, 2);
+        rt.pushClipGeometry(outer);
+        rt.pushClipGeometry(inner);
+        const Color translucent{ 0.1f, 0.2f, 0.9f, 0.6f };
+        rt.clear(translucent);
+        rt.popAxisAlignedClip();
+        rt.popAxisAlignedClip();
+    };
+    const auto m = gpuVersusCpu(drawingContext, 96, 96, draw, "nested_clear");
+    expectClipMatch(m, "clear under nested clips");
+}
+
 #endif // GMPI_UI_TESTS_BACKEND_GPU
