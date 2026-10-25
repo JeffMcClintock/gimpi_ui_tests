@@ -1529,3 +1529,58 @@ TEST_F(DrawingTest, AdditiveBitmap)
     bigRT.endDraw();
     EXPECT_TRUE(checkBitmap("AdditiveBitmap", bigRT, 2, 8.0));
 }
+
+// fillGeometry's opacity brush masks the fill by its alpha: the left half of
+// the mask is opaque, the right half transparent, so only the left is filled.
+// (Direct2D was once handed the fill brush as the mask, which filled it all.)
+// Direct2D only: the CPU and GPU backends decline an opacity brush.
+// DISABLED: on this target Direct2D draws nothing at all when FillGeometry is
+// given an opacity brush (bitmap fill brush, bitmap mask, aliased or not), and
+// EndDraw still reports success. Enable it once the masked fill works.
+#if defined(_WIN32) && !GMPI_UI_TESTS_BACKEND_GPU
+TEST_F(DrawingTest, DISABLED_FillGeometryOpacityBrushMasksTheFill)
+{
+    constexpr uint32_t kW = 32, kH = 16;
+    const auto srgb = static_cast<int32_t>(gmpi::drawing::BitmapRenderTargetFlags::SRGBPixels);
+
+    auto maskRT = drawingContext.createCpuRenderTarget({ kW, kH }, srgb);
+    maskRT.beginDraw();
+    maskRT.clear(Color{ 0.f, 0.f, 0.f, 0.f });
+    maskRT.fillRectangle({ 0.f, 0.f, kW / 2.f, float(kH) }, maskRT.createSolidColorBrush(Colors::Black));
+    maskRT.endDraw();
+
+    // Direct2D wants a bitmap brush for the fill too when there is a mask.
+    auto fillRT = drawingContext.createCpuRenderTarget({ kW, kH }, srgb);
+    fillRT.beginDraw();
+    fillRT.clear(Colors::Red);
+    fillRT.endDraw();
+
+    auto rt = drawingContext.createCpuRenderTarget({ kW, kH }, srgb);
+    auto geom = rt.getFactory().createPathGeometry();
+    {
+        auto sink = geom.open();
+        sink.beginFigure({ 0.f, 0.f }, FigureBegin::Filled);
+        sink.addLine({ float(kW), 0.f });
+        sink.addLine({ float(kW), float(kH) });
+        sink.addLine({ 0.f, float(kH) });
+        sink.endFigure(FigureEnd::Closed);
+        sink.close();
+    }
+
+    auto fillBitmap = fillRT.getBitmap();
+    auto maskBitmap = maskRT.getBitmap();
+    rt.beginDraw();
+    rt.clear(Colors::White);
+    rt.fillGeometry(geom, rt.createBitmapBrush(fillBitmap), rt.createBitmapBrush(maskBitmap));
+    rt.endDraw();
+
+    auto bmp    = rt.getBitmap();
+    auto pixels = bmp.lockPixels(BitmapLockFlags::Read);
+    const uint8_t* addr = pixels.getAddress();
+    const int32_t  bpr  = pixels.getBytesPerRow();
+    const auto green = [&](int x, int y) { return addr[y * bpr + x * 4 + 1]; }; // red fill: G = 0, white: G = 255
+
+    EXPECT_EQ(green(8, 8), 0)    << "inside the opaque half of the mask: filled";
+    EXPECT_EQ(green(24, 8), 255) << "inside the transparent half: untouched";
+}
+#endif
