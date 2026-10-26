@@ -93,6 +93,70 @@ TEST_F(DrawingTest, FillUnderNegativeScaleIsMirrored)
     EXPECT_LT(inkCoverage(px, 31, 20), 0.02f);
 }
 
+// The clip is transformed like the fill. Taken as two corners, a mirrored clip
+// came out right < left and a 45-degree one zero wide, and the GPU backend
+// clipped the whole draw away.
+TEST_F(DrawingTest, ClipUnderNegativeScaleIsMirrored)
+{
+    auto black = g.createSolidColorBrush(Colors::Black);
+    g.setTransform(Matrix3x2{ -1.0f, 0.0f, 0.0f, 1.0f, 64.0f, 0.0f }); // x -> 64 - x
+    g.pushAxisAlignedClip({ 8.0f, 8.0f, 24.0f, 40.0f });                // device x 40 .. 56
+
+    const auto clip = g.getAxisAlignedClip();
+    EXPECT_FLOAT_EQ(clip.left, 8.0f);
+    EXPECT_FLOAT_EQ(clip.top, 8.0f);
+    EXPECT_FLOAT_EQ(clip.right, 24.0f);
+    EXPECT_FLOAT_EQ(clip.bottom, 40.0f);
+
+    g.fillRectangle({ 0.0f, 0.0f, 64.0f, 64.0f }, black);
+    g.popAxisAlignedClip();
+    g.setTransform(Matrix3x2{});
+    g.endDraw();
+    drawingActive = false;
+
+    auto bitmap = g.getBitmap();
+    auto px = bitmap.lockPixels(BitmapLockFlags::Read);
+
+    EXPECT_GT(inkCoverage(px, 48, 20), 0.98f) << "inside the mirrored clip";
+    EXPECT_LT(inkCoverage(px, 16, 20), 0.02f) << "where the clip would be without the mirror";
+    EXPECT_LT(inkCoverage(px, 48, 50), 0.02f) << "below the clip";
+}
+
+TEST_F(DrawingTest, ClipUnderRotationKeepsItsInterior)
+{
+    auto black = g.createSolidColorBrush(Colors::Black);
+    g.setTransform(makeRotation(0.785398f, gmpi::drawing::Point{ 32.0f, 32.0f }));
+    g.pushAxisAlignedClip({ 24.0f, 24.0f, 40.0f, 40.0f }); // a diamond reaching 11.3 from the centre
+    g.fillRectangle({ 0.0f, 0.0f, 64.0f, 64.0f }, black);
+    g.popAxisAlignedClip();
+    g.setTransform(Matrix3x2{});
+    g.endDraw();
+    drawingActive = false;
+
+    auto bitmap = g.getBitmap();
+    auto px = bitmap.lockPixels(BitmapLockFlags::Read);
+
+    EXPECT_GT(inkCoverage(px, 32, 32), 0.98f) << "centre";
+    EXPECT_GT(inkCoverage(px, 26, 32), 0.98f) << "left of centre, inside the diamond";
+    EXPECT_GT(inkCoverage(px, 37, 32), 0.98f) << "right of centre, inside the diamond";
+    EXPECT_LT(inkCoverage(px, 4, 4), 0.02f) << "far outside";
+}
+
+// getAxisAlignedClip reports the clip in force: the intersection of the stack.
+TEST_F(DrawingTest, NestedClipReportsTheIntersection)
+{
+    g.pushAxisAlignedClip({ 8.0f, 8.0f, 40.0f, 40.0f });
+    g.pushAxisAlignedClip({ 20.0f, 20.0f, 60.0f, 60.0f });
+    const auto clip = g.getAxisAlignedClip();
+    g.popAxisAlignedClip();
+    g.popAxisAlignedClip();
+
+    EXPECT_FLOAT_EQ(clip.left, 20.0f);
+    EXPECT_FLOAT_EQ(clip.top, 20.0f);
+    EXPECT_FLOAT_EQ(clip.right, 40.0f);
+    EXPECT_FLOAT_EQ(clip.bottom, 40.0f);
+}
+
 // A rotated bitmap reaches beyond the box of its destination's top-left and
 // bottom-right corners. The GPU backend's CPU fallback once drew it into a
 // patch of exactly that box, cutting off two corners. Nearest-neighbour, so
