@@ -1542,7 +1542,7 @@ TEST(CpuText, DpiScalesTextLikeATransform)
             const auto m = makeScale(2.f, 2.f);
             AccessPtr::get(rt)->setTransform(&m);
         }
-        rt.drawTextU("Lowest", tf, Rect{ 6.f, 6.f, 70.f, 30.f }, rt.createSolidColorBrush(Colors::Black));
+        rt.drawTextU("Lowest", tf, gmpi::drawing::Rect{ 6.f, 6.f, 70.f, 30.f }, rt.createSolidColorBrush(Colors::Black));
         rt.endDraw();
         return rt.getBitmap();
     };
