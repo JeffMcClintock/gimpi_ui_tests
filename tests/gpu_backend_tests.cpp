@@ -852,6 +852,78 @@ TEST_F(DrawingTest, GpuTextCacheSharesOneRasterAcrossColours)
     }
 }
 
+TEST_F(DrawingTest, GpuTextCacheOverBudgetDropsTheOldestFramesFirst)
+{
+    // Text that is new every frame (a log, live readouts) overflows the cache.
+    // Each trim must drop the least recently used entries down to the trim
+    // mark - whole old frames go, the newest stay - and text must still draw.
+    g.endDraw();
+    drawingActive = false;
+
+    using GpuBitmap = gmpi::gpugfx::Bitmap;
+    constexpr int kRows = 60;
+    auto rt = drawingContext.createCpuRenderTarget({ 1024, 1024 });
+    auto targetBitmap = rt.getBitmap();
+    auto* gpuBitmap = dynamic_cast<GpuBitmap*>(AccessPtr::get(targetBitmap));
+    ASSERT_NE(gpuBitmap, nullptr);
+    auto tf = makeTextFormat(40.0f);
+
+    auto frameOfNewText = [&](int frame) {
+        rt.beginDraw();
+        rt.clear(Colors::White);
+        auto ink = rt.createSolidColorBrush(Colors::Black);
+        for (int row = 0; row < kRows; ++row)
+        {
+            const std::string s = "frame " + std::to_string(frame) + " row " + std::to_string(row) + " of new text";
+            const float y = float(row) * 16.0f;
+            rt.drawTextU(s, tf, { 4.0f, y, 1020.0f, y + 60.0f }, ink);
+        }
+        rt.endDraw();
+    };
+
+    frameOfNewText(0);
+    const size_t perFrame = gpuBitmap->textCacheBytes;
+    ASSERT_GT(perFrame, 0u);
+    // Two frames must fit under the trim mark, or "the newest stay" says nothing.
+    ASSERT_LT(perFrame * 2, GpuBitmap::kTextCacheTrimBytes) << "rows too large for this test";
+
+    const int frames = int(GpuBitmap::kTextCacheBudgetBytes / perFrame) + 3;
+    bool trimmed = false;
+    for (int frame = 1; frame < frames; ++frame)
+    {
+        const size_t before = gpuBitmap->textCacheBytes;
+        frameOfNewText(frame);
+        const size_t after = gpuBitmap->textCacheBytes;
+        EXPECT_LE(after, GpuBitmap::kTextCacheBudgetBytes) << "frame " << frame;
+        if (after < before + perFrame / 2) // this frame's trim ran
+        {
+            trimmed = true;
+            EXPECT_LE(after, GpuBitmap::kTextCacheTrimBytes) << "frame " << frame;
+
+            // Least recently used first: the last two frames are all still here.
+            const uint64_t last = gpuBitmap->submits - 1;
+            int lastFrame = 0, frameBefore = 0;
+            for (const auto& [key, entry] : gpuBitmap->textCache)
+            {
+                lastFrame += entry.lastUsed == last;
+                frameBefore += entry.lastUsed + 1 == last;
+            }
+            EXPECT_EQ(lastFrame, kRows) << "frame " << frame;
+            EXPECT_EQ(frameBefore, kRows) << "frame " << frame;
+        }
+    }
+    EXPECT_TRUE(trimmed) << "the cache never went over budget: the test did not test anything";
+
+    // And text still draws: ink where the first row is.
+    frameOfNewText(frames);
+    auto px = targetBitmap.lockPixels(BitmapLockFlags::Read);
+    int inked = 0;
+    for (uint32_t y = 0; y < 40; ++y)
+        for (uint32_t x = 0; x < 400; ++x)
+            inked += pixelAt(px, x, y)[0] < 0.5f;
+    EXPECT_GT(inked, 200);
+}
+
 // --- Bitmaps: cropped and nearest-neighbour stretches on the GPU -----------------
 // The image shader clamps its sample coordinate to the source rect and, for
 // nearest, snaps to the texel centre - cpugfx's sampling rule, so a cropped
