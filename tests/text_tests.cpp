@@ -945,6 +945,15 @@ TEST_F(DrawingTest, TextBaselines200)
 // to find the lowest (largest y) non-white pixel, and prints a table
 // comparing the measured value against the predicted baseline pixel.
 
+// Direct2D snaps the baseline to the nearest half-DIP, and so does the CPU
+// backend (which the GPU backend uses for these sRGB targets): one prediction
+// for all three. Only native CoreGraphics is predicted by calibration.
+#if defined(_WIN32) || GMPI_UI_TESTS_BACKEND_CPU || GMPI_UI_TESTS_BACKEND_GPU
+#define BASELINE_SNAPS_TO_HALF_DIP 1
+#else
+#define BASELINE_SNAPS_TO_HALF_DIP 0
+#endif
+
 // Helper: runs the lowest-lit-pixel scan at a given DPI and prints
 // a results table.  Returns the number of prediction errors.
 static int runBaselineLowestPixelTest(DrawingTestContext& drawingContext,
@@ -1011,7 +1020,7 @@ static int runBaselineLowestPixelTest(DrawingTestContext& drawingContext,
             return lowest;
         };
 
-#ifndef _WIN32
+#if !BASELINE_SNAPS_TO_HALF_DIP
         // macOS calibration: CoreText rasterisation places the glyph
         // bottom at a font-size-dependent sub-pixel offset that cannot
         // be derived from metrics alone.  We binary-search for the DIP
@@ -1039,9 +1048,9 @@ static int runBaselineLowestPixelTest(DrawingTestContext& drawingContext,
                 else
                     lo = mid;
             }
-            // At the transition offset T, B0 + T ≈ cal0 + 1.
+            // At the transition offset T (DIPs), B0 + T * dpiScale ≈ cal0 + 1.
             const float T = (lo + hi) * 0.5f;
-            B0 = static_cast<float>(cal0 + 1) - T;
+            B0 = static_cast<float>(cal0 + 1) - T * dpiScale;
         }
 #endif
 
@@ -1050,7 +1059,7 @@ static int runBaselineLowestPixelTest(DrawingTestContext& drawingContext,
             const float subPx    = si * 0.1f;
             const int   lowestY  = measureLowest(subPx);
 
-#ifdef _WIN32
+#if BASELINE_SNAPS_TO_HALF_DIP
             // Predict the lowest lit pixel row.
             // D2D snaps the text baseline to the nearest half-DIP, then
             // the lowest lit pixel is one above the snapped value in
@@ -1060,9 +1069,10 @@ static int runBaselineLowestPixelTest(DrawingTestContext& drawingContext,
             const float snappedPx  = snappedDIP * dpiScale;
             const int   predicted  = static_cast<int>(std::ceil(snappedPx)) - 1;
 #else
-            // macOS: predict from calibrated glyph-bottom position.
-            // The glyph shifts linearly with subPx in DIP space.
-            const int   predicted  = static_cast<int>(std::floor(B0 + subPx));
+            // CoreGraphics: predict from calibrated glyph-bottom position.
+            // The glyph shifts linearly with subPx in DIP space, so by
+            // subPx * dpiScale device pixels (B0 is in device pixels).
+            const int   predicted  = static_cast<int>(std::floor(B0 + subPx * dpiScale));
 #endif
             table.push_back({fontHeight, subPx, lowestY, predicted});
         }
