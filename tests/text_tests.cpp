@@ -38,6 +38,20 @@ TEST_F(DrawingTest, DrawTextSimpleBodyHeight)
     EXPECT_TRUE(checkResult("drawTextSimpleBodyHeight", 2, 20.0));
 }
 
+// Ask for a cap height, get that cap height, whichever backend renders (Cocoa ignored the flag until gmpi_ui 2026-10-27).
+TEST_F(DrawingTest, CapHeightFlagSetsTheCapHeight)
+{
+    for (const auto weight : { FontWeight::Regular, FontWeight::Bold })
+    {
+        auto tf = makeTextFormat(20.f, "Selawik", weight, FontStyle::Normal, FontStretch::Normal, FontFlags::CapHeight);
+        ASSERT_NE(AccessPtr::get(tf), nullptr);
+        EXPECT_NEAR(tf.getFontMetrics().capHeight, 20.0f, 0.01f) << "weight " << int(weight);
+    }
+
+    // Without the flag the request is the em size, so the cap height is well short of it.
+    EXPECT_LT(makeTextFormat(20.f).getFontMetrics().capHeight, 17.0f);
+}
+
 // Text centred horizontally and vertically in the bitmap.
 TEST_F(DrawingTest, DrawTextCentred)
 {
