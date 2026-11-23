@@ -55,6 +55,7 @@ static_assert(int32_t{ GMPI_PIXEL_FORMAT_RGBA_SRGB_8I } == api::IBitmapPixels::R
 static_assert(int32_t{ GMPI_PIXEL_FORMAT_RGBA_16F } == api::IBitmapPixels::RGBA_16f);
 static_assert(int32_t{ GMPI_PIXEL_FORMAT_ALPHA_8I } == api::IBitmapPixels::Alpha_8i);
 static_assert(GMPI_FONT_FLAGS_CAP_HEIGHT == static_cast<int32_t>(gmpi::drawing::FontFlags::CapHeight));
+static_assert(GMPI_FONT_FLAGS_EXACT_FAMILY == static_cast<int32_t>(gmpi::drawing::FontFlags::ExactFamily));
 static_assert(int32_t{ GMPI_TEXT_STYLE_FLAGS_HAS_COLOR } == gmpi::drawing::TextStyleFlags::HasColor);
 static_assert(int32_t{ GMPI_DRAW_TEXT_OPTIONS_NO_MAC_SMOOTH } == gmpi::drawing::DrawTextOptions::noMacSmooth);
 

@@ -654,6 +654,32 @@ TEST(CpuVsD2D, CapHeightWorksForFontsWithoutSCapHeight)
     }
 }
 
+// A font stack picks the first INSTALLED family, and still yields a font when none is.
+TEST(CpuVsD2D, FontStackSkipsMissingFamilies)
+{
+    DrawingTestContext d2d;
+
+    const std::string_view missing[]{ "No Such Font 7f3a" };
+    const std::string_view stack[]{ "No Such Font 7f3a", "Also Missing 7f3a", "Courier New" };
+    const std::string_view courier[]{ "Courier New" };
+    const std::string_view arial[]{ "Arial" };
+
+    // Proportional vs monospace: the width tells the two families apart.
+    const auto width = [&](std::span<const std::string_view> families)
+    {
+        auto format = d2d.factory().createTextFormat(20.0f, families);
+        EXPECT_NE(AccessPtr::get(format), nullptr);
+        return format ? format.getTextExtentU("iiiiWWWW").width : 0.0f;
+    };
+
+    const auto courierWidth = width(courier);
+    const auto arialWidth   = width(arial);
+    ASSERT_GT(std::abs(courierWidth - arialWidth), 1.0f) << "the two fonts are indistinguishable here";
+
+    EXPECT_NEAR(width(stack), courierWidth, 0.01f) << "a missing family hid the installed one behind it";
+    EXPECT_NEAR(width(missing), arialWidth, 0.01f) << "an all-missing stack must fall back to Arial";
+}
+
 // A markdown heading is a multiplier on the base font size. The subtlety is
 // WHICH base: createRichTextFormat builds its base format through
 // createTextFormat, which may have scaled the size to hit a requested cap
