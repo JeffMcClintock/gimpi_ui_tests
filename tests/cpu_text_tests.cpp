@@ -171,6 +171,36 @@ TEST(CpuText, CapHeightFlagRescales)
         << "FontFlags::CapHeight must rescale so the cap height matches the request";
 }
 
+// A font stack picks the first INSTALLED family; the system must not substitute for a missing one.
+TEST(CpuText, FontStackSkipsMissingFamilies)
+{
+    TextContext ctx;
+
+    const auto width = [&](std::span<const std::string_view> families)
+    {
+        auto format = ctx.factory.createTextFormat(20.0f, families);
+        EXPECT_NE(AccessPtr::get(format), nullptr);
+        return format ? format.getTextExtentU("iiiiWWWW").width : 0.0f;
+    };
+
+    const std::string_view missing[]{ "No Such Font 7f3a" };
+    const std::string_view bundled[]{ kTestFont };
+    const std::string_view stack[]{ "No Such Font 7f3a", "Also Missing 7f3a", kTestFont };
+
+    EXPECT_NEAR(width(stack), width(bundled), 0.01f) << "a missing family hid the installed one behind it";
+    EXPECT_GT(width(missing), 0.0f) << "an all-missing stack must still fall back to a real font";
+
+#if GMPI_UI_FONT_PROVIDER_FONTCONFIG
+    // Generic names are never "missing": fontconfig resolves them to whatever is installed.
+    const std::string_view mono[]{ "monospace" };
+    const std::string_view sans[]{ "sans-serif" };
+    const std::string_view monoStack[]{ "No Such Font 7f3a", "monospace" };
+
+    if (std::abs(width(mono) - width(sans)) > 1.0f) // else this box cannot tell them apart
+        EXPECT_NEAR(width(monoStack), width(mono), 0.01f) << "a generic family was treated as missing";
+#endif
+}
+
 TEST(CpuText, ExtentGrowsWithTextAndSize)
 {
     TextContext ctx;
