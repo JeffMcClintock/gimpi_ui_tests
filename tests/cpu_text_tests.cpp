@@ -190,14 +190,27 @@ TEST(CpuText, FontStackSkipsMissingFamilies)
     EXPECT_NEAR(width(stack), width(bundled), 0.01f) << "a missing family hid the installed one behind it";
     EXPECT_GT(width(missing), 0.0f) << "an all-missing stack must still fall back to a real font";
 
-#if GMPI_UI_FONT_PROVIDER_FONTCONFIG
-    // Generic names are never "missing": fontconfig resolves them to whatever is installed.
+#if GMPI_UI_FONT_PROVIDER_FONTCONFIG || defined(__APPLE__)
+    // Generic names are never "missing": fontconfig resolves them, macOS maps them to a real family.
     const std::string_view mono[]{ "monospace" };
     const std::string_view sans[]{ "sans-serif" };
     const std::string_view monoStack[]{ "No Such Font 7f3a", "monospace" };
 
     if (std::abs(width(mono) - width(sans)) > 1.0f) // else this box cannot tell them apart
         EXPECT_NEAR(width(monoStack), width(mono), 0.01f) << "a generic family was treated as missing";
+#endif
+
+#ifdef __APPLE__
+    // Same families the Direct2D backend picks, in any letter case.
+    const std::string_view courier[]{ "Courier New" };
+    const std::string_view arial[]{ "Arial" };
+    const std::string_view mixedCase[]{ "Sans-Serif" };
+
+    if (std::abs(width(courier) - width(arial)) > 1.0f) // else Courier New is not installed
+    {
+        EXPECT_NEAR(width(mono), width(courier), 0.01f) << "monospace did not map to Courier New";
+        EXPECT_NEAR(width(mixedCase), width(arial), 0.01f) << "generic names must match in any case";
+    }
 #endif
 }
 
